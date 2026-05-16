@@ -4,7 +4,7 @@ return PlaceObj('ModDef', {
 	'short_description', "Press t to toggle train tracks.",
 	'id', "TForTracks",
 	'author', "fredware",
-	'version', 9,
+	'version', 1,
 	'lua_revision', 350453,
 	'saved_with_revision', 380799,
 	'code', {

@@ -4,7 +4,7 @@ return PlaceObj('ModDef', {
 	'short_description', "Drag-select mixed rover types.",
 	'id', "SelectMixedRovers",
 	'author', "fredware",
-	'version', 9,
+	'version', 1,
 	'lua_revision', 350453,
 	'saved_with_revision', 380799,
 	'code', {

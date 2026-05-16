@@ -4,7 +4,7 @@ return PlaceObj('ModDef', {
 	'short_description', "Ctrl+Delete force-deletes the selected object.",
 	'id', "ForceDelete",
 	'author', "fredware",
-	'version', 3,
+	'version', 1,
 	'lua_revision', 350453,
 	'saved_with_revision', 380799,
 	'code', {

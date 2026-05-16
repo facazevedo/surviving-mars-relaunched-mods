@@ -4,7 +4,7 @@ return PlaceObj('ModDef', {
 	'short_description', "Press Delete to toggle salvage mode.",
 	'id', "SalvageToolShortcut",
 	'author', "fredware",
-	'version', 3,
+	'version', 1,
 	'lua_revision', 350453,
 	'saved_with_revision', 380799,
 	'code', {
