@@ -218,6 +218,36 @@ local function IsDome(obj)
 		and (IsKindOf(obj, "Dome") or ClassName(obj):find("Dome", 1, true) ~= nil)
 end
 
+local function IsPassageObject(obj)
+	local class_name = ClassName(obj)
+
+	return IsObjectValid(obj)
+		and (IsKindOf(obj, "PassageBase") or class_name:find("Passage", 1, true) ~= nil)
+		and type(ReadField(obj, "elements")) == "table"
+end
+
+local function PassageObjectFor(obj)
+	if IsPassageObject(obj) then
+		return obj
+	end
+
+	local passage_obj = ReadField(obj, "passage_obj")
+
+	return IsPassageObject(passage_obj) and passage_obj or false
+end
+
+local function PreparePassageForDelete(obj)
+	if not IsPassageObject(obj) then
+		return
+	end
+
+	-- Passage elements ask the passage whether it can delete itself while the
+	-- passage is already being deleted. Keep them from DoneObject-ing it twice.
+	WriteField(obj, "CanDelete", function()
+		return false
+	end)
+end
+
 -- Detect whether an object is a dome floor/terrain visual attachment.
 local function IsDomeVisualAttach(obj)
 	local class_name = ClassName(obj)
@@ -1383,6 +1413,13 @@ CollectDeleteObjects = function(obj, objects, seen, is_root)
 		return
 	end
 
+	local passage_obj = PassageObjectFor(obj)
+
+	if passage_obj and passage_obj ~= obj then
+		CollectDeleteObjects(passage_obj, objects, seen, is_root)
+		return
+	end
+
 	if IsResourceDepositObject(obj) or IsMarker(obj) then
 		CollectResourceDepositObjects(obj, objects, seen)
 		return
@@ -1471,6 +1508,12 @@ DeleteObject = function(obj)
 		return false
 	end
 
+	local passage_obj = PassageObjectFor(obj)
+
+	if passage_obj and passage_obj ~= obj then
+		obj = passage_obj
+	end
+
 	if IsResourceDepositObject(obj) or IsMarker(obj) then
 		UnregisterDepositObject(obj)
 		PruneObjectFromGlobalLabels(obj)
@@ -1483,6 +1526,10 @@ DeleteObject = function(obj)
 
 	local ok = pcall(function()
 		local set_command = ReadField(obj, "SetCommand")
+
+		if IsPassageObject(obj) then
+			PreparePassageForDelete(obj)
+		end
 
 		if IsColonist(obj) then
 			if type(set_command) == "function" and type(ReadField(obj, "Erase")) == "function" then
