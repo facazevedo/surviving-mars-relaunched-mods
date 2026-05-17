@@ -228,7 +228,14 @@ function Display.EnsurePanel()
 
 	local get_interface = rawget(_G, "GetInGameInterface")
 	local terminal = rawget(_G, "terminal")
-	local parent = type(get_interface) == "function" and get_interface() or false
+	local parent = false
+
+	-- UI globals may exist before they are safe to call during mod loading.
+	if type(get_interface) == "function" then
+		local ok, result = pcall(get_interface)
+		parent = ok and result or false
+	end
+
 	parent = parent or (terminal and terminal.desktop)
 
 	if not parent then

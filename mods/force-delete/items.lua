@@ -15,4 +15,28 @@ return {
 		'name', "ForceDeleteColonist",
 		'CodeFileName', "Code/fd_colonist.lua",
 	}),
+	PlaceObj('ModItemCode', {
+		'name', "ForceDeleteDrone",
+		'CodeFileName', "Code/fd_drone.lua",
+	}),
+	PlaceObj('ModItemCode', {
+		'name', "ForceDeleteAnimal",
+		'CodeFileName', "Code/fd_animal.lua",
+	}),
+	PlaceObj('ModItemCode', {
+		'name', "ForceDeleteShuttle",
+		'CodeFileName', "Code/fd_shuttle.lua",
+	}),
+	PlaceObj('ModItemCode', {
+		'name', "ForceDeleteInfrastructure",
+		'CodeFileName', "Code/fd_infrastructure.lua",
+	}),
+	PlaceObj('ModItemCode', {
+		'name', "ForceDeleteInternalBuilding",
+		'CodeFileName', "Code/fd_internal_building.lua",
+	}),
+	PlaceObj('ModItemCode', {
+		'name', "ForceDeleteExternalBuilding",
+		'CodeFileName', "Code/fd_external_building.lua",
+	}),
 }

@@ -10,6 +10,12 @@ _G.ForceDelete = FD
 FD.LVL1_ACTION_ID = "ForceDelete_Level1_CtrlDelete"
 FD.LVL2_ACTION_ID = "ForceDelete_Level2_CtrlShiftDelete"
 
+-- Common identity fields shown by object-specific inspector modules.
+FD.IDENTITY_FIELDS = { "name", "display_name", "handle", "id", "index", "Index" }
+
+-- Common demolition methods shown by non-unit object modules.
+FD.DEMOLISHABLE_METHODS = { "CanDemolish", "DoDemolish", "delete" }
+
 -- Return an optional engine global without creating it.
 function FD.Global(name)
 	return rawget(_G, name)
@@ -36,6 +42,19 @@ function FD.ReadField(obj, field)
 	end)
 
 	return ok and value or nil
+end
+
+-- Write a field on an engine object without trusting table/userdata behavior.
+function FD.WriteField(obj, field, value)
+	if not obj then
+		return false
+	end
+
+	local ok = pcall(function()
+		obj[field] = value
+	end)
+
+	return ok
 end
 
 -- Call a zero-argument object method safely.
@@ -137,6 +156,203 @@ function FD.ObjectSummary(obj)
 	return text
 end
 
+-- Return whether an object appears to support the game's normal demolition path.
+function FD.IsDemolishable(obj)
+	if not FD.IsObjectValid(obj) then
+		return false
+	end
+
+	if FD.IsKindOf(obj, "Demolishable") then
+		return true
+	end
+
+	local explicit_flag = FD.ReadField(obj, "demolishable")
+	if type(explicit_flag) == "boolean" then
+		return explicit_flag
+	end
+
+	local can_demolish = FD.ReadField(obj, "CanDemolish")
+	if type(can_demolish) == "function" then
+		local ok, result = pcall(can_demolish, obj)
+		if ok and type(result) == "boolean" then
+			return result
+		end
+	end
+
+	return type(FD.ReadField(obj, "DoDemolish")) == "function"
+end
+
+-- Return whether an object looks like a building or demolishable construction.
+function FD.IsBuildingLike(obj)
+	if not FD.IsObjectValid(obj) then
+		return false
+	end
+
+	local class = FD.ClassName(obj)
+	return FD.IsKindOf(obj, "Building")
+		or class:find("Building", 1, true) ~= nil
+		or type(FD.ReadField(obj, "DoDemolish")) == "function"
+end
+
+-- Return whether an object is one of the live unit types handled separately.
+function FD.IsProtectedUnit(obj)
+	return (FD.Colonist and FD.Colonist.IsColonist(obj))
+		or (FD.Drone and FD.Drone.IsDrone(obj))
+		or (FD.Animal and FD.Animal.IsAnimal(obj))
+		or (FD.Shuttle and FD.Shuttle.IsShuttle(obj))
+end
+
+-- Return whether an object is a dome-like building that needs separate logic later.
+function FD.IsDomeLikeObject(obj)
+	return FD.IsKindOf(obj, "Dome") or FD.ClassName(obj):find("Dome", 1, true) ~= nil
+end
+
+-- Convert one inspected value into compact inspector text.
+function FD.AttributeText(value)
+	local value_type = type(value)
+	if value_type == "table" or value_type == "userdata" then
+		return FD.ObjectSummary(value)
+	end
+
+	return FD.SafeToString(value)
+end
+
+-- Append one key/value row to an inspector attribute list.
+function FD.AddAttribute(rows, label, value)
+	rows[#rows + 1] = { label, FD.AttributeText(value) }
+end
+
+-- Append a fixed set of safely read fields to an inspector attribute list.
+function FD.AddFieldAttributes(rows, obj, fields)
+	for _, field in ipairs(fields or {}) do
+		FD.AddAttribute(rows, field, FD.ReadField(obj, field))
+	end
+end
+
+-- Return a boolean result from an object method, or nil if unavailable.
+function FD.MethodBool(obj, method)
+	local fn = FD.ReadField(obj, method)
+	if type(fn) ~= "function" then
+		return nil
+	end
+
+	local ok, result = pcall(fn, obj)
+	return ok and (result and true or false) or nil
+end
+
+-- Return a display-ready boolean method result.
+function FD.MethodText(obj, method)
+	local result = FD.MethodBool(obj, method)
+	return result == nil and "unavailable" or tostring(result)
+end
+
+-- Call an object method with arguments and return whether it succeeded.
+function FD.CallObjectMethod(obj, method, ...)
+	local fn = FD.ReadField(obj, method)
+	if type(fn) ~= "function" then
+		return false
+	end
+
+	local ok = pcall(fn, obj, ...)
+	return ok and true or false
+end
+
+-- Stop an active demolition countdown thread before forcing demolition now.
+function FD.StopDemolitionThread(obj)
+	local thread = FD.ReadField(obj, "demolishing_thread")
+
+	if FD.SafeCall(FD.Global("IsValidThread"), thread) then
+		FD.SafeCall(FD.Global("DeleteThread"), thread)
+	end
+
+	FD.WriteField(obj, "demolishing_thread", false)
+end
+
+-- Try the game's own demolition transition before using direct deletion.
+function FD.DemolishObjectNow(obj)
+	if not FD.IsDemolishable(obj) or type(FD.ReadField(obj, "DoDemolish")) ~= "function" then
+		return false
+	end
+
+	FD.WriteField(obj, "demolishing", true)
+	FD.WriteField(obj, "demolishing_countdown", 0)
+	FD.StopDemolitionThread(obj)
+
+	return FD.CallObjectMethod(obj, "DoDemolish")
+end
+
+-- Remove an object directly when the normal demolition path is unavailable.
+function FD.DeleteObjectDirect(obj)
+	if not FD.IsObjectValid(obj) then
+		return false
+	end
+
+	if FD.CallObjectMethod(obj, "delete") then
+		return true
+	end
+
+	return FD.SafeCall(FD.Global("DoneObject"), obj) and true or false
+end
+
+-- Delete one non-unit object through demolition first, then direct fallback.
+function FD.DeleteNonUnitObject(obj)
+	return FD.DemolishObjectNow(obj) or FD.DeleteObjectDirect(obj)
+end
+
+-- Delete a named non-unit type and report a concise result message.
+function FD.DeleteNamedNonUnitObject(obj, is_supported, label, invalid_message)
+	if not is_supported then
+		FD.ShowDeleteMessage("Force delete pressed.\n\n" .. invalid_message)
+		return false
+	end
+
+	local summary = FD.ObjectSummary(obj)
+	if FD.DeleteNonUnitObject(obj) then
+		FD.ShowDeleteMessage("Force delete pressed.\n\nDeleted " .. label .. ": " .. summary)
+		return true
+	end
+
+	FD.ShowDeleteMessage("Force delete pressed.\n\nCould not delete " .. label .. ": " .. summary)
+	return false
+end
+
+-- Append common identity, level, and validity rows for supported objects.
+function FD.AddCommonObjectAttributes(rows, obj, object_type, reason)
+	local object_level = FD.ConfiguredLevelForType(object_type, obj)
+	local level_1_allowed = FD.Config
+		and FD.Config.CanForceDeleteAtLevel
+		and FD.Config.CanForceDeleteAtLevel(object_type, 1, obj)
+	local level_2_allowed = FD.Config
+		and FD.Config.CanForceDeleteAtLevel
+		and FD.Config.CanForceDeleteAtLevel(object_type, 2, obj)
+
+	FD.AddAttribute(rows, "is_demolishable", FD.IsDemolishable(obj))
+	FD.AddAttribute(rows, "Selected", FD.ObjectSummary(obj))
+	FD.AddAttribute(rows, "Class", FD.ClassName(obj))
+	FD.AddAttribute(rows, "object_type", object_type)
+	FD.AddAttribute(rows, "configured level", object_level and ("Level " .. object_level) or "unconfigured")
+	FD.AddAttribute(rows, "Level 1 delete", level_1_allowed == true)
+	FD.AddAttribute(rows, "Level 2 delete", level_2_allowed == true)
+
+	if reason then
+		FD.AddAttribute(rows, "reason", reason)
+	end
+
+	FD.AddAttribute(rows, "valid", FD.IsObjectValid(obj))
+end
+
+-- Append common lifecycle and method-availability rows.
+function FD.AddMethodDiagnostics(rows, obj, methods)
+	FD.AddAttribute(rows, "IsDead()", FD.MethodText(obj, "IsDead"))
+	FD.AddAttribute(rows, "IsDying()", FD.MethodText(obj, "IsDying"))
+
+	for _, method in ipairs(methods or {}) do
+		FD.AddAttribute(rows, method .. " method", type(FD.ReadField(obj, method)) == "function")
+	end
+
+	FD.AddAttribute(rows, "DoneObject global", type(FD.Global("DoneObject")) == "function")
+end
+
 -- Chain a game message handler without replacing existing handlers.
 function FD.ChainOnMsg(message, key, handler)
 	local on_msg = FD.Global("OnMsg")
@@ -174,36 +390,78 @@ function FD.ResolveContext(context)
 		or context
 end
 
--- Return the first selected object from common gameplay/editor sources.
-function FD.SelectedObject()
-	local obj = FD.Global("SelectedObj")
-	if FD.IsObjectValid(obj) then
-		return obj
+-- Append a valid object once so multi-selection batches do not duplicate work.
+function FD.AddUniqueSelectedObject(objects, seen, obj)
+	if not FD.IsObjectValid(obj) or seen[obj] then
+		return
 	end
 
-	local selection = FD.Global("Selection")
-	if type(selection) == "table" and FD.IsObjectValid(selection[1]) then
-		return selection[1]
+	seen[obj] = true
+	objects[#objects + 1] = obj
+end
+
+-- Append valid objects from an array-style selection table.
+function FD.AddSelectedObjectsFromArray(objects, seen, list)
+	if type(list) ~= "table" then
+		return
 	end
+
+	for _, obj in ipairs(list) do
+		FD.AddUniqueSelectedObject(objects, seen, obj)
+	end
+end
+
+-- Return selected objects from common gameplay/editor sources.
+function FD.SelectedObjects()
+	local objects = {}
+	local seen = {}
+
+	-- Multi-selection order should control both batch deletion and inspector focus.
+	FD.AddSelectedObjectsFromArray(objects, seen, FD.Global("Selection"))
+	if #objects > 0 then
+		return objects
+	end
+
+	FD.AddUniqueSelectedObject(objects, seen, FD.Global("SelectedObj"))
 
 	local get_dialog = FD.Global("GetDialog")
 	local infopanel = FD.SafeCall(get_dialog, "Infopanel")
-	obj = FD.ResolveContext(FD.ReadField(infopanel, "context") or FD.CallMethod(infopanel, "GetContext"))
-	if FD.IsObjectValid(obj) then
-		return obj
-	end
+	FD.AddUniqueSelectedObject(
+		objects,
+		seen,
+		FD.ResolveContext(FD.ReadField(infopanel, "context") or FD.CallMethod(infopanel, "GetContext"))
+	)
 
 	local editor = FD.Global("editor")
 	if editor and type(editor.GetSel) == "function" then
-		local selected = FD.SafeCall(editor.GetSel)
-		if type(selected) == "table" and FD.IsObjectValid(selected[1]) then
-			return selected[1]
-		end
+		FD.AddSelectedObjectsFromArray(objects, seen, FD.SafeCall(editor.GetSel))
 	end
 
 	local selo = FD.Global("selo")
-	obj = FD.SafeCall(selo)
-	return FD.IsObjectValid(obj) and obj or false
+	FD.AddUniqueSelectedObject(objects, seen, FD.SafeCall(selo))
+
+	return objects
+end
+
+-- Return the first selected object for display-focused operations.
+function FD.SelectedObject()
+	local objects = FD.SelectedObjects()
+
+	return objects[1] or false
+end
+
+-- Clear active gameplay/editor selection before deleting selected objects.
+function FD.ClearSelection()
+	FD.SafeCall(FD.Global("SelectObj"), false)
+
+	local editor = FD.Global("editor")
+	if editor and type(editor.ClearSel) == "function" then
+		pcall(function()
+			editor.ClearSel()
+		end)
+	end
+
+	FD.last_selected_object = false
 end
 
 -- Return the Force Delete object type handled by installed modules.
@@ -212,13 +470,58 @@ function FD.ObjectType(obj)
 		return "colonist"
 	end
 
+	if FD.Drone and FD.Drone.IsDrone(obj) then
+		return "drone"
+	end
+
+	if FD.Animal and FD.Animal.IsAnimal(obj) then
+		return "animal"
+	end
+
+	if FD.Shuttle and FD.Shuttle.IsShuttle(obj) then
+		return "shuttle"
+	end
+
+	if FD.Infrastructure and FD.Infrastructure.IsInfrastructure(obj) then
+		return "infrastructure"
+	end
+
+	if FD.InternalBuilding and FD.InternalBuilding.IsInternalBuilding(obj) then
+		return "internal_building"
+	end
+
+	if FD.ExternalBuilding and FD.ExternalBuilding.IsExternalBuilding(obj) then
+		return "external_building"
+	end
+
 	return false
 end
 
--- Return the configured force-delete level for one object type.
-function FD.ConfiguredLevelForType(object_type)
+-- Return the module that owns one supported object type.
+function FD.HandlerForType(object_type)
+	if object_type == "colonist" then
+		return FD.Colonist
+	elseif object_type == "drone" then
+		return FD.Drone
+	elseif object_type == "animal" then
+		return FD.Animal
+	elseif object_type == "shuttle" then
+		return FD.Shuttle
+	elseif object_type == "infrastructure" then
+		return FD.Infrastructure
+	elseif object_type == "internal_building" then
+		return FD.InternalBuilding
+	elseif object_type == "external_building" then
+		return FD.ExternalBuilding
+	end
+
+	return false
+end
+
+-- Return the configured force-delete level for one selected object.
+function FD.ConfiguredLevelForType(object_type, obj)
 	if FD.Config and FD.Config.GetObjectLevel then
-		return FD.Config.GetObjectLevel(object_type)
+		return FD.Config.GetObjectLevel(object_type, obj)
 	end
 
 	return false
@@ -229,6 +532,11 @@ function FD.ShowShortcutMessage(message)
 	if FD.DisplayAttributes then
 		FD.DisplayAttributes.ShowMessage(message)
 	end
+end
+
+-- Show deletion feedback through the inspector panel when it exists.
+function FD.ShowDeleteMessage(message)
+	FD.ShowShortcutMessage(message)
 end
 
 -- Return the configured attribute refresh interval with a safe fallback.
@@ -242,8 +550,22 @@ end
 
 -- Delete one object by delegating to the module that owns its type.
 function FD.DeleteObjectByType(obj, object_type)
-	if object_type == "colonist" and FD.Colonist and FD.Colonist.Delete then
-		return FD.Colonist.Delete(obj)
+	local handler = FD.HandlerForType(object_type)
+
+	if handler and handler.Delete then
+		return handler.Delete(obj)
+	end
+
+	return false
+end
+
+-- Show one supported object's attributes through its owning module.
+function FD.ShowObjectAttributes(obj, object_type)
+	local handler = FD.HandlerForType(object_type)
+
+	if handler and handler.OnSelected then
+		handler.OnSelected(obj)
+		return true
 	end
 
 	return false
@@ -270,10 +592,12 @@ function FD.RefreshSelectionDiagnostics()
 		return
 	end
 
+	local object_type = FD.ObjectType(obj)
+
 	if not FD.IsObjectValid(obj) then
 		FD.DisplayAttributes.ShowMessage("No object selected.")
-	elseif FD.Colonist and FD.Colonist.IsColonist(obj) then
-		FD.Colonist.OnSelected(obj)
+	elseif object_type and FD.ShowObjectAttributes(obj, object_type) then
+		return
 	else
 		FD.DisplayAttributes.ShowMessage("Selected object is not supported yet.")
 	end
@@ -305,41 +629,79 @@ end
 
 -- Run one configured force-delete level against the current selection.
 function FD.RunForceDeleteLevel(requested_level, shortcut_message)
-	local obj = FD.SelectedObject()
+	local selected_objects = FD.SelectedObjects()
 
-	if not FD.IsObjectValid(obj) then
+	if #selected_objects == 0 then
 		FD.shortcut_feedback_active = true
 		FD.ShowShortcutMessage(shortcut_message .. "\n\nNo object selected.")
 		return false
 	end
 
-	local object_type = FD.ObjectType(obj)
-	local object_level = FD.ConfiguredLevelForType(object_type)
+	local delete_plan = {}
+	local skipped_unsupported = 0
+	local skipped_level = 0
 
-	if not object_type or not object_level then
-		FD.shortcut_feedback_active = true
-		FD.ShowShortcutMessage(shortcut_message .. "\n\nSelected object is not supported yet.")
-		return false
+	-- Build the complete batch before clearing selection.
+	for _, obj in ipairs(selected_objects) do
+		local object_type = FD.ObjectType(obj)
+		local object_level = FD.ConfiguredLevelForType(object_type, obj)
+		local can_delete = object_type
+			and object_level
+			and FD.Config
+			and FD.Config.CanForceDeleteAtLevel
+			and FD.Config.CanForceDeleteAtLevel(object_type, requested_level, obj)
+
+		if can_delete then
+			delete_plan[#delete_plan + 1] = {
+				obj = obj,
+				object_type = object_type,
+			}
+		elseif not object_type or not object_level then
+			skipped_unsupported = skipped_unsupported + 1
+		else
+			skipped_level = skipped_level + 1
+		end
 	end
 
-	-- Config decides whether this shortcut level may dispatch deletion.
-	if not FD.Config
-		or not FD.Config.CanForceDeleteAtLevel
-		or not FD.Config.CanForceDeleteAtLevel(object_type, requested_level) then
+	if #delete_plan == 0 then
 		FD.shortcut_feedback_active = true
 		FD.ShowShortcutMessage(
 			shortcut_message
-				.. "\n\nSelected "
-				.. object_type
-				.. " is Level "
-				.. FD.SafeToString(object_level)
-				.. "."
+				.. "\n\nNo selected objects are eligible for Level "
+				.. FD.SafeToString(requested_level)
+				.. " deletion."
 		)
 		return false
 	end
 
+	FD.ClearSelection()
 	FD.shortcut_feedback_active = true
-	return FD.DeleteObjectByType(obj, object_type)
+
+	local deleted = 0
+	local failed = 0
+
+	-- Run each module-owned delete handler after selection is no longer active.
+	for _, item in ipairs(delete_plan) do
+		if FD.DeleteObjectByType(item.obj, item.object_type) then
+			deleted = deleted + 1
+		else
+			failed = failed + 1
+		end
+	end
+
+	FD.ShowShortcutMessage(
+		shortcut_message
+			.. "\n\nDeleted: "
+			.. FD.SafeToString(deleted)
+			.. "\nFailed: "
+			.. FD.SafeToString(failed)
+			.. "\nSkipped unsupported: "
+			.. FD.SafeToString(skipped_unsupported)
+			.. "\nSkipped level: "
+			.. FD.SafeToString(skipped_level)
+	)
+
+	return deleted > 0
 end
 
 -- Level 1 deletes only objects configured for Level 1.
