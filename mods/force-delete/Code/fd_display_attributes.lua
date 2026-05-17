@@ -15,7 +15,7 @@ local Display = FD.DisplayAttributes
 -- Panel constants mirror the working Attribute Inspector approach.
 local PANEL_ID = "ForceDeleteInspectorDialog"
 local PANEL_TITLE = "Force-delete Inspector"
-local PANEL_BACKGROUND = RGBA(0, 0, 0, 230)
+local PANEL_BACKGROUND = RGBA(0, 0, 0, 200)
 local TRANSPARENT = RGBA(0, 0, 0, 0)
 local PANEL_Z_ORDER = 10000
 local dialog = false
@@ -67,31 +67,14 @@ local function ResetScroll()
 	end
 end
 
-DefineClass.ForceDeleteAttributesPanel = {
-	__parents = { "XDialog" },
-	IdNode = true,
-	Dock = "box",
-	HAlign = "right",
-	VAlign = "bottom",
-	Margins = box(0, 0, 20, 80),
-	Padding = box(8, 8, 8, 8),
-	LayoutMethod = "VList",
-	LayoutVSpacing = 4,
-	Clip = "self",
-	MinWidth = 520,
-	MaxWidth = 680,
-	MinHeight = 300,
-	MaxHeight = 600,
-	Background = PANEL_BACKGROUND,
-	FocusedBackground = PANEL_BACKGROUND,
-	DisabledBackground = PANEL_BACKGROUND,
-	HandleMouse = false,
-	ChildrenHandleMouse = true,
-}
-
 -- Create a plain text body when scroll controls are unavailable.
 local function CreatePlainBody(panel)
-	panel.idBody = XText:new({
+	local x_text = rawget(_G, "XText")
+	if not x_text then
+		return false
+	end
+
+	panel.idBody = x_text:new({
 		Id = "idBody",
 		Text = "No object selected.",
 		Translate = false,
@@ -105,21 +88,23 @@ local function CreatePlainBody(panel)
 		UseClipBox = true,
 		HandleMouse = false,
 	}, panel)
+
+	return true
 end
 
 -- Create a scrollable text body using the engine's standard XScrollArea pattern.
 local function CreateScrollableBody(panel)
-	if not XWindow or not XScrollArea or not XText then
-		return false
-	end
+	local x_window = rawget(_G, "XWindow")
+	local x_scroll_area = rawget(_G, "XScrollArea")
+	local x_text = rawget(_G, "XText")
+	local scroll_class = rawget(_G, "XSleekScroll") or rawget(_G, "Scrollbar")
 
-	local scroll_class = XSleekScroll or Scrollbar
-	if not scroll_class then
+	if not x_window or not x_scroll_area or not x_text or not scroll_class then
 		return false
 	end
 
 	local ok = pcall(function()
-		local body_container = XWindow:new({
+		local body_container = x_window:new({
 			Id = "idBodyContainer",
 			HAlign = "stretch",
 			VAlign = "stretch",
@@ -135,7 +120,7 @@ local function CreateScrollableBody(panel)
 			ChildrenHandleMouse = true,
 		}, panel)
 
-		local scroll_area = XScrollArea:new({
+		local scroll_area = x_scroll_area:new({
 			Id = "idScrollArea",
 			IdNode = false,
 			HAlign = "stretch",
@@ -153,7 +138,7 @@ local function CreateScrollableBody(panel)
 		}, body_container)
 		panel.idScrollArea = scroll_area
 
-		panel.idBody = XText:new({
+		panel.idBody = x_text:new({
 			Id = "idBody",
 			Text = "No object selected.",
 			Translate = false,
@@ -177,11 +162,40 @@ local function CreateScrollableBody(panel)
 	return ok
 end
 
--- Build the panel controls and keep text refreshed while the panel exists.
-function ForceDeleteAttributesPanel:Init()
-	dialog = self
+-- Build the panel directly instead of relying on a reload-sensitive global class.
+local function CreatePanel(parent)
+	local x_dialog = rawget(_G, "XDialog")
+	local x_label = rawget(_G, "XLabel")
+	if not x_dialog or not x_label then
+		return false
+	end
 
-	self.idTitle = XLabel:new({
+	local panel = x_dialog:new({
+		Id = PANEL_ID,
+		ZOrder = PANEL_Z_ORDER,
+		IdNode = true,
+		Dock = "box",
+		HAlign = "right",
+		VAlign = "bottom",
+		Margins = box(0, 0, 20, 80),
+		Padding = box(8, 8, 8, 8),
+		LayoutMethod = "VList",
+		LayoutVSpacing = 4,
+		Clip = "self",
+		MinWidth = 520,
+		MaxWidth = 680,
+		MinHeight = 300,
+		MaxHeight = 600,
+		Background = PANEL_BACKGROUND,
+		FocusedBackground = PANEL_BACKGROUND,
+		DisabledBackground = PANEL_BACKGROUND,
+		HandleMouse = false,
+		ChildrenHandleMouse = true,
+	}, parent)
+
+	dialog = panel
+
+	panel.idTitle = x_label:new({
 		Id = "idTitle",
 		Text = PANEL_TITLE,
 		Translate = false,
@@ -191,12 +205,14 @@ function ForceDeleteAttributesPanel:Init()
 		HAlign = "stretch",
 		VAlign = "top",
 		HandleMouse = false,
-	}, self)
+	}, panel)
 
 	-- Prefer a scrollable body, but keep the simple panel working if scrolling fails.
-	if not CreateScrollableBody(self) then
-		CreatePlainBody(self)
+	if not CreateScrollableBody(panel) then
+		CreatePlainBody(panel)
 	end
+
+	return panel
 end
 
 -- Create the panel when the game UI parent is available.
@@ -219,12 +235,8 @@ function Display.EnsurePanel()
 		return false
 	end
 
-	pcall(function()
-		dialog = ForceDeleteAttributesPanel:new({
-			Id = PANEL_ID,
-			ZOrder = PANEL_Z_ORDER,
-		}, parent)
-	end)
+	local ok, panel = pcall(CreatePanel, parent)
+	dialog = ok and panel or false
 
 	Display.UpdatePanel()
 	return dialog
