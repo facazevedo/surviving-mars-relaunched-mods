@@ -642,11 +642,276 @@ local function DeleteContainedAnimals(obj)
 	end
 end
 
+local function DisableObjectLights(obj)
+	if not IsObjectValid(obj) then
+		return
+	end
+
+	if type(ReadField(obj, "SetIsNightLightPossible")) == "function" then
+		pcall(function()
+			obj:SetIsNightLightPossible(false, true)
+		end)
+
+		pcall(function()
+			obj:SetIsNightLightPossible(false)
+		end)
+	end
+
+	if type(ReadField(obj, "NightLightDisable")) == "function" then
+		pcall(function()
+			obj:NightLightDisable()
+		end)
+	end
+
+	if type(ReadField(obj, "WorkLightsOff")) == "function" then
+		pcall(function()
+			obj:WorkLightsOff()
+		end)
+	elseif type(ReadField(obj, "SetSIModulation")) == "function" then
+		pcall(function()
+			obj:SetSIModulation(0)
+		end)
+	end
+end
+
+local function IsComponentLightObject(obj)
+	return IsObjectValid(obj)
+		and (IsKindOf(obj, "ComponentLight") or ClassName(obj):find("ComponentLight", 1, true) ~= nil)
+end
+
+local function ClearLightFlags(obj)
+	if type(ReadField(obj, "ClearLightFlags")) ~= "function" then
+		return
+	end
+
+	local game_const = Global("const")
+
+	if not game_const then
+		return
+	end
+
+	for _, flag_name in ipairs({
+		"elfInterior",
+		"elfExterior",
+		"elfInteriorAndExteriorWhenHasShadowmap",
+		"elfCastShadows",
+		"elfTerrainShadows",
+		"elfDetailedShadows",
+	}) do
+		local flag = game_const[flag_name]
+
+		if flag then
+			pcall(function()
+				obj:ClearLightFlags(flag)
+			end)
+		end
+	end
+end
+
+local function NeutralizeClusterLight(obj)
+	if not IsObjectValid(obj) then
+		return
+	end
+
+	DisableObjectLights(obj)
+
+	local game_const = Global("const")
+
+	if game_const and game_const.efVisible and type(ReadField(obj, "ClearEnumFlags")) == "function" then
+		pcall(function()
+			obj:ClearEnumFlags(game_const.efVisible)
+		end)
+	end
+
+	ClearLightFlags(obj)
+
+	for _, method_name in ipairs({
+		"SetIntensity",
+		"SetIntensity0",
+		"SetIntensity1",
+		"SetConstantIntensity",
+	}) do
+		local method = ReadField(obj, method_name)
+
+		if type(method) == "function" then
+			pcall(function()
+				method(obj, 0)
+			end)
+		end
+	end
+
+	for _, method_name in ipairs({
+		"SetVolumeId",
+		"SetTargetVolumeId",
+	}) do
+		local method = ReadField(obj, method_name)
+
+		if type(method) == "function" then
+			pcall(function()
+				method(obj, 0)
+			end)
+		end
+	end
+
+	if game_const and game_const.eLightTypePoint and type(ReadField(obj, "SetLightType")) == "function" then
+		pcall(function()
+			obj:SetLightType(game_const.eLightTypePoint)
+		end)
+	end
+
+	if type(ReadField(obj, "DestroyRenderObj")) == "function" then
+		pcall(function()
+			obj:DestroyRenderObj(true)
+		end)
+
+		pcall(function()
+			obj:DestroyRenderObj()
+		end)
+	end
+end
+
+local function DestroyLightObject(obj)
+	if not IsObjectValid(obj) then
+		return false
+	end
+
+	NeutralizeClusterLight(obj)
+
+	if type(ReadField(obj, "Destroy")) == "function" then
+		local ok = pcall(function()
+			obj:Destroy()
+		end)
+
+		if ok then
+			return true
+		end
+	end
+
+	local ok = pcall(function()
+		if type(ReadField(obj, "delete")) == "function" then
+			obj:delete()
+			return
+		end
+
+		SafeCall(Global("DoneObject"), obj)
+	end)
+
+	return ok
+end
+
+local function NeedsRenderObjectsRebuild(objects_to_delete)
+	for _, obj in ipairs(objects_to_delete) do
+		if IsDome(obj) or IsComponentLightObject(obj) then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function AddDomeLight(lights, seen, obj)
+	if IsComponentLightObject(obj) and not seen[obj] then
+		seen[obj] = true
+		lights[#lights + 1] = obj
+	end
+end
+
+local function CollectDomeLights(dome)
+	local lights = {}
+	local seen = {}
+
+	AddDomeLight(lights, seen, ReadField(dome, "cupola_interior_marker"))
+
+	if type(ReadField(dome, "ForEachAttach")) == "function" then
+		pcall(function()
+			dome:ForEachAttach("ComponentLight", function(attach)
+				AddDomeLight(lights, seen, attach)
+			end)
+		end)
+
+		pcall(function()
+			dome:ForEachAttach(function(attach)
+				AddDomeLight(lights, seen, attach)
+			end)
+		end)
+	end
+
+	return lights
+end
+
+local function DisableObjectsLightsFromTable(list, seen)
+	if type(list) ~= "table" then
+		return
+	end
+
+	local scanned = 0
+
+	for _, obj in ipairs(list) do
+		scanned = scanned + 1
+
+		if scanned > MAX_CONTAINED_LABEL_SCAN then
+			return
+		end
+
+		if IsObjectValid(obj) and not seen[obj] then
+			seen[obj] = true
+			DisableObjectLights(obj)
+		end
+	end
+
+	for key, value in pairs(list) do
+		if scanned > MAX_CONTAINED_LABEL_SCAN then
+			return
+		end
+
+		local obj = false
+
+		if IsObjectValid(value) then
+			obj = value
+		elseif IsObjectValid(key) then
+			obj = key
+		end
+
+		if obj and not seen[obj] then
+			scanned = scanned + 1
+			seen[obj] = true
+			DisableObjectLights(obj)
+		end
+	end
+end
+
+local function DisableDomeLights(dome)
+	if not IsDome(dome) then
+		return
+	end
+
+	local seen = {}
+
+	seen[dome] = true
+	DisableObjectLights(dome)
+
+	local labels = ReadField(dome, "labels")
+
+	if type(labels) == "table" then
+		for _, label_list in pairs(labels) do
+			DisableObjectsLightsFromTable(label_list, seen)
+		end
+	end
+
+	for _, light in ipairs(CollectDomeLights(dome)) do
+		DestroyLightObject(light)
+	end
+
+	WriteField(dome, "cupola_interior_marker", false)
+end
+
 -- Remove one valid object without invoking recursive delete logic.
 local function ForceDeleteObject(obj)
 	if not IsObjectValid(obj) then
 		return false
 	end
+
+	DisableObjectLights(obj)
 
 	local ok = pcall(function()
 		if type(ReadField(obj, "delete")) == "function" then
@@ -1514,6 +1779,12 @@ DeleteObject = function(obj)
 		obj = passage_obj
 	end
 
+	if IsDome(obj) then
+		DisableDomeLights(obj)
+	else
+		DisableObjectLights(obj)
+	end
+
 	if IsResourceDepositObject(obj) or IsMarker(obj) then
 		UnregisterDepositObject(obj)
 		PruneObjectFromGlobalLabels(obj)
@@ -1699,6 +1970,7 @@ local function HardForceDeleteSelectedObjects()
 		return false
 	end
 
+	local rebuild_render_objects = NeedsRenderObjectsRebuild(objects_to_delete)
 	local undo_started = BeginDeleteUndo(objects_to_delete)
 
 	SafeCall(Global("SuspendPassEditsForEditOp"))
@@ -1713,6 +1985,11 @@ local function HardForceDeleteSelectedObjects()
 
 	SafeCall(Global("ResumePassEditsForEditOp"))
 	EndDeleteUndo(undo_started)
+
+	if rebuild_render_objects then
+		SafeCall(Global("RecreateRenderObjects"))
+	end
+
 	ClearSelection()
 
 	return true
