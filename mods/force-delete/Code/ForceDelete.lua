@@ -1361,9 +1361,14 @@ function FD.DroneShouldResetForDelete(drone, delete_set, affected_cities)
 		return true
 	end
 
-	local city = FD.ReadField(drone, "city")
-
-	return affected_cities[city] and FD.DroneIsActiveDelivery(drone)
+	-- Be deliberately conservative for hard-delete. A drone that is already in
+	-- a delivery/pickup/work command can later run its command destructor and
+	-- call Building:DroneUnloadResource on an object whose stockpile/map state
+	-- has just been invalidated by dome deletion. Earlier versions limited this
+	-- to drones whose city matched the delete batch, but some drones have nil or
+	-- mismatched city references during teardown. Reset all active delivery
+	-- drones visible through the scanned city/colony labels.
+	return FD.DroneIsActiveDelivery(drone)
 end
 
 function FD.ResetDroneForDeletedTarget(drone)
@@ -1371,19 +1376,34 @@ function FD.ResetDroneForDeletedTarget(drone)
 		return
 	end
 
-	-- Do not call SetCommand("Reset") here. Reset can run command
-	-- destructors later, and those destructors may call DroneUnloadResource on
-	-- a stockpile/building whose map state was just invalidated by hard-delete.
-	-- Hard-delete needs an immediate raw detach instead.
-	FD.StopCommandObject(drone)
+	for _, field in ipairs({
+		"d_request",
+		"s_request",
+		"w_request",
+		"picked_up_from_req",
+		"request",
+		"resource_request",
+	}) do
+		FD.MarkForceDeleteDetachedField(drone, field)
+	end
 
+	-- Do not call SetCommand("Reset") here. Reset and normal command-thread
+	-- deletion can run command destructors later, and those destructors may call
+	-- DroneUnloadResource on a stockpile/building whose map state was just
+	-- invalidated by hard-delete. Hard-delete needs an immediate raw detach.
 	for _, method_name in ipairs({
 		"DroneLoadResource",
 		"DroneUnloadResource",
 		"DroneWork",
+		"UnloadResource",
+		"LoadResource",
 	}) do
 		FD.WriteField(drone, method_name, FD.ForceDeleteNoOp)
 	end
+
+	FD.WriteField(drone, "command_destructors", false)
+	FD.WriteField(drone, "command_queue", nil)
+	FD.WriteField(drone, "forced_cmd_importance", nil)
 
 	for _, field in ipairs({
 		"target",
@@ -1407,14 +1427,14 @@ function FD.ResetDroneForDeletedTarget(drone)
 
 	FD.WriteField(drone, "amount", 0)
 	FD.WriteField(drone, "command", false)
-	FD.WriteField(drone, "command_queue", nil)
-	FD.WriteField(drone, "command_destructors", false)
 
 	if type(FD.ReadField(drone, "DestroyAttaches")) == "function" then
 		pcall(function()
 			drone:DestroyAttaches("ResourceStockpileBox")
 		end)
 	end
+
+	FD.StopCommandObjectNoDestructors(drone)
 end
 
 function FD.ResetDronesFromTable(list, delete_set, affected_cities, seen)
@@ -1624,10 +1644,196 @@ function FD.ForceDeleteNoOp()
 	return false
 end
 
+
+-- Mark objects whose pending drone/resource callbacks must no-op.  Some drone
+-- command destructors can fire long after hard-delete and call back into
+-- Building/HasConsumption/ResourceStockpile methods.  The guard below prevents
+-- those delayed callbacks from touching objects whose map state is already
+-- detached or invalid.
+function FD.IsTaskRequestObject(obj)
+	if not obj then
+		return false
+	end
+
+	-- Task/request userdata can be read but should not receive arbitrary
+	-- fields. Writing a temporary flag to these objects triggers the engine
+	-- assert "Indexing a task request". Requests are detached by clearing the
+	-- owning drone/building fields instead of marking the request itself.
+	return type(FD.ReadField(obj, "GetSource")) == "function"
+		and type(FD.ReadField(obj, "GetMap")) ~= "function"
+		and not FD.ReadField(obj, "class")
+end
+
+function FD.CanAttachForceDeleteFlag(obj)
+	if not obj or FD.IsTaskRequestObject(obj) then
+		return false
+	end
+
+	if type(obj) == "table" then
+		return true
+	end
+
+	if not FD.IsObjectValid(obj) then
+		return false
+	end
+
+	return FD.ReadField(obj, "class") ~= nil
+		or type(FD.ReadField(obj, "GetMap")) == "function"
+		or type(FD.ReadField(obj, "GetPos")) == "function"
+		or type(FD.ReadField(obj, "delete")) == "function"
+		or type(FD.ReadField(obj, "Destroy")) == "function"
+end
+
+function FD.MarkForceDeleteDetached(obj)
+	if not FD.CanAttachForceDeleteFlag(obj) then
+		return
+	end
+
+	FD.WriteField(obj, "force_delete_detached", true)
+	FD.WriteField(obj, "force_delete_pending", true)
+end
+
+function FD.MarkForceDeleteDetachedField(obj, field)
+	FD.MarkForceDeleteDetached(FD.ReadField(obj, field))
+end
+
+function FD.ObjectHasInvalidMap(obj)
+	if not obj then
+		return true
+	end
+
+	local get_map = FD.ReadField(obj, "GetMap")
+
+	if type(get_map) ~= "function" then
+		return false
+	end
+
+	local ok, map = pcall(function()
+		return get_map(obj)
+	end)
+
+	return not ok or not map
+end
+
+function FD.IsForceDeleteDetachedObject(obj)
+	if not obj then
+		return true
+	end
+
+	if FD.ReadField(obj, "force_delete_detached") or FD.ReadField(obj, "force_delete_pending") then
+		return true
+	end
+
+	local parent = FD.ReadField(obj, "parent")
+
+	if parent and parent ~= obj then
+		if FD.ReadField(parent, "force_delete_detached") or FD.ReadField(parent, "force_delete_pending") then
+			return true
+		end
+	end
+
+	return FD.ObjectHasInvalidMap(obj)
+end
+
+function FD.ShouldBlockDroneResourceCallback(self, ...)
+	if FD.IsForceDeleteDetachedObject(self) then
+		return true
+	end
+
+	local args = { ... }
+
+	for _, value in ipairs(args) do
+		if type(value) == "table" and FD.IsForceDeleteDetachedObject(value) then
+			return true
+		end
+	end
+
+	return false
+end
+
+function FD.PatchClassMethodGuard(class_name, method_name)
+	FD.patched_method_guards = FD.patched_method_guards or {}
+
+	local key = class_name .. "." .. method_name
+
+	if FD.patched_method_guards[key] then
+		return
+	end
+
+	local class_table = FD.Global(class_name)
+
+	if type(class_table) ~= "table" then
+		return
+	end
+
+	local original = FD.ReadField(class_table, method_name)
+
+	if type(original) ~= "function" then
+		return
+	end
+
+	local ok = FD.WriteField(class_table, method_name, function(self, ...)
+		if FD.ShouldBlockDroneResourceCallback(self, ...) then
+			return false
+		end
+
+		return original(self, ...)
+	end)
+
+	if ok then
+		FD.patched_method_guards[key] = original
+	end
+end
+
+function FD.PatchDroneResourceMethodGuards()
+	local guarded_methods = {
+		ResourceStockpile = {
+			"UpdateVisualStockpile",
+			"DroneLoadResource",
+			"DroneUnloadResource",
+			"SetCount",
+			"SetCountInternal",
+			"SetCountFromRequest",
+		},
+		ResourceStockpileBase = {
+			"UpdateVisualStockpile",
+			"DroneLoadResource",
+			"DroneUnloadResource",
+			"SetCount",
+			"SetCountInternal",
+			"SetCountFromRequest",
+		},
+		HasConsumption = {
+			"ConsumptionDroneUnload",
+			"MaintenanceDroneUnload",
+			"DroneLoadResource",
+			"DroneUnloadResource",
+			"UpdateVisualStockpile",
+			"UpdateConsumption",
+			"UpdateRequestConnectivity",
+		},
+		Building = {
+			"DroneLoadResource",
+			"DroneUnloadResource",
+			"UpdateVisualStockpile",
+			"UpdateConsumption",
+			"UpdateRequestConnectivity",
+		},
+	}
+
+	for class_name, methods in pairs(guarded_methods) do
+		for _, method_name in ipairs(methods) do
+			FD.PatchClassMethodGuard(class_name, method_name)
+		end
+	end
+end
+
 function FD.NeutralizeStockpileCallbacks(stockpile)
 	if not FD.IsObjectValid(stockpile) then
 		return
 	end
+
+	FD.MarkForceDeleteDetached(stockpile)
 
 	for _, method_name in ipairs({
 		"SetCount",
@@ -1676,6 +1882,20 @@ end
 function FD.NeutralizeDroneResourceCallbacks(obj)
 	if not FD.IsObjectValid(obj) then
 		return
+	end
+
+	FD.MarkForceDeleteDetached(obj)
+
+	for _, field in ipairs({
+		"consumption_resource_stockpile",
+		"consumption_resource_request",
+		"maintenance_resource_request",
+		"d_request",
+		"s_request",
+		"w_request",
+		"picked_up_from_req",
+	}) do
+		FD.MarkForceDeleteDetachedField(obj, field)
 	end
 
 	for _, method_name in ipairs({
@@ -2062,6 +2282,7 @@ function FD.ForceDeleteObject(obj)
 		return false
 	end
 
+	FD.MarkForceDeleteDetached(obj)
 	FD.DisableObjectLights(obj)
 
 	local ok = pcall(function()
@@ -2074,6 +2295,70 @@ function FD.ForceDeleteObject(obj)
 	end)
 
 	return ok
+end
+
+-- Remove an object only after the game demolition pipeline has already been
+-- force-started.  This is intentionally separate from DeleteObject(), because
+-- DeleteObject() routes live domes back through staged demolition to avoid
+-- corrupting the supply grid.
+function FD.PruneObjectFromKnownContainers(obj)
+	if not FD.IsObjectValid(obj) then
+		return
+	end
+
+	local containers = {
+		FD.ReadField(obj, "city"),
+		FD.ReadField(obj, "dome"),
+		FD.ReadField(obj, "parent"),
+		FD.ReadField(obj, "parent_dome"),
+		FD.Global("UICity"),
+		FD.Global("MainCity"),
+		FD.Global("SelectedCity"),
+		FD.Global("UIColony"),
+	}
+	local seen = {}
+
+	for _, container in ipairs(containers) do
+		if container and container ~= obj and not seen[container] then
+			seen[container] = true
+			FD.PruneObjectFromContainerLabels(container, obj)
+		end
+	end
+
+	FD.PruneObjectFromGlobalLabels(obj)
+end
+
+function FD.HardRemoveAfterStagedDemolition(obj)
+	if not FD.IsObjectValid(obj) then
+		return false
+	end
+
+	local passage_obj = FD.PassageObjectFor(obj)
+
+	if passage_obj and passage_obj ~= obj then
+		obj = passage_obj
+	end
+
+	FD.MarkForceDeleteDetached(obj)
+	FD.PruneObjectFromKnownContainers(obj)
+
+	if FD.IsResourceDepositObject(obj) or FD.IsMarker(obj) then
+		FD.UnregisterDepositObject(obj)
+	end
+
+	if FD.IsPassageObject(obj) then
+		FD.PreparePassageForDelete(obj)
+	end
+
+	if FD.IsDome(obj) then
+		FD.DisableDomeLights(obj)
+		FD.ClearDomeVisuals(obj)
+		FD.ResetDomeTerrain(obj)
+	else
+		FD.DisableObjectLights(obj)
+	end
+
+	return FD.ForceDeleteObject(obj)
 end
 
 -- Remove dome floor, grass, decals, and road visual attachments only.
@@ -2308,9 +2593,42 @@ function FD.StopCommandObject(obj)
 	obj.command = false
 end
 
+-- Stop command threads without asking the engine to run command destructors.
+-- This is used for drones during hard-delete, because drone command
+-- destructors may call DroneUnloadResource after a dome/building/stockpile has
+-- already been forcibly detached.
+function FD.StopCommandObjectNoDestructors(obj)
+	if not FD.IsObjectValid(obj) then
+		return
+	end
+
+	local command_thread = FD.ReadField(obj, "command_thread")
+	local destructor_thread = FD.ReadField(obj, "thread_running_destructors")
+
+	FD.WriteField(obj, "command_destructors", false)
+	FD.WriteField(obj, "command_queue", nil)
+	FD.WriteField(obj, "forced_cmd_importance", nil)
+
+	for _, thread in ipairs({ command_thread, destructor_thread }) do
+		if FD.SafeCall(FD.Global("IsValidThread"), thread) then
+			FD.SafeCall(FD.Global("DeleteThread"), thread)
+		end
+	end
+
+	FD.WriteField(obj, "command_thread", nil)
+	FD.WriteField(obj, "thread_running_destructors", nil)
+	FD.WriteField(obj, "command", false)
+end
+
 FD.DeleteObject = function(obj)
 	if not FD.IsObjectValid(obj) then
 		return false
+	end
+
+	-- Never directly delete a live dome. Dome teardown is tightly coupled to the
+	-- supply grid and must be owned by the game's demolition code.
+	if FD.IsDome(obj) then
+		return FD.StagedDemolishObject(obj)
 	end
 
 	local passage_obj = FD.PassageObjectFor(obj)
@@ -2516,17 +2834,21 @@ function FD.StopDemolitionThread(obj)
 	FD.WriteField(obj, "demolishing_thread", false)
 end
 
--- Ctrl+Delete: run the normal demolition path when possible.
-function FD.FD_LightDeleteSelectedObject()
+function FD.LightDeleteTargetObject()
 	local obj = FD.Global("SelectedObj")
 
-	if not FD.CanForceDelete(obj) then
-		if not FD.IsLightDeleteGridElement(obj) then
-			return false
-		end
+	if FD.IsObjectValid(obj) then
+		return obj
+	end
 
-		FD.SafeCall(FD.Global("SelectObj"), false)
-		return FD.DeleteObject(obj)
+	local selected_objects = FD.SelectedObjects()
+
+	return selected_objects[1]
+end
+
+function FD.DemolishObjectNow(obj)
+	if not FD.CanForceDelete(obj) then
+		return false
 	end
 
 	FD.WriteField(obj, "demolishing", true)
@@ -2539,6 +2861,305 @@ function FD.FD_LightDeleteSelectedObject()
 	end)
 
 	return ok
+end
+
+-- Return whether the object can be passed through the game's demolition code.
+-- This is intentionally less restrictive than CanForceDelete(): hard delete uses
+-- this to force-start the normal demolition pipeline even when CanDemolish()
+-- would refuse because of ordinary game rules. It still requires the object to
+-- be a Demolishable engine object with DoDemolish().
+function FD.CanUseGameDemolitionPipeline(obj)
+	return FD.IsObjectValid(obj)
+		and not FD.IsLightDeleteProtected(obj)
+		and FD.IsKindOf(obj, "Demolishable")
+		and type(FD.ReadField(obj, "DoDemolish")) == "function"
+end
+
+-- Force-start the game's own demolition transition. This should be preferred
+-- for live buildings because DoDemolish owns grid, request, label, passage, and
+-- building-internal teardown. Direct DoneObject/delete is reserved for objects
+-- that cannot go through this path.
+function FD.DemolishObjectNowRaw(obj)
+	if not FD.CanUseGameDemolitionPipeline(obj) then
+		return false
+	end
+
+	FD.WriteField(obj, "demolishing", true)
+	FD.WriteField(obj, "demolishing_countdown", 0)
+	FD.StopDemolitionThread(obj)
+	FD.SafeCall(FD.Global("SelectObj"), false)
+
+	local ok = pcall(function()
+		obj:DoDemolish()
+	end)
+
+	return ok
+end
+
+-- Minimal pre-cleanup before using the normal demolition pipeline. Do not mark
+-- the building as force-delete-detached here and do not neutralize its class
+-- methods; DoDemolish may need those methods to unregister the object cleanly.
+function FD.PrepareObjectForStagedDemolition(obj)
+	if not FD.IsObjectValid(obj) then
+		return
+	end
+
+	-- Animals/pets held by domes are not reliably cleaned up by immediate forced
+	-- demolition, so delete them first. Colonists are detached, not deleted.
+	if FD.IsDome(obj) then
+		FD.DeleteContainedAnimals(obj)
+	end
+
+	FD.DetachContainedColonists(obj)
+end
+
+function FD.StagedDemolishNonDomeObject(obj)
+	if not FD.CanUseGameDemolitionPipeline(obj) then
+		return false
+	end
+
+	FD.PrepareObjectForStagedDemolition(obj)
+	return FD.DemolishObjectNowRaw(obj)
+end
+
+function FD.StagedDemolishObject(obj)
+	if not FD.CanUseGameDemolitionPipeline(obj) then
+		return false
+	end
+
+	-- Domes own interior buildings and dome-local grid state. Demolishing the
+	-- dome alone can leave still-live internal buildings that later touch stale
+	-- supply-grid cells. First stage-demolish internal buildings, then let the
+	-- game's own dome DoDemolish() remove the dome.
+	if FD.IsDome(obj) and type(FD.StagedDemolishDome) == "function" then
+		return FD.StagedDemolishDome(obj)
+	end
+
+	return FD.StagedDemolishNonDomeObject(obj)
+end
+
+function FD.StagedDemolishAndHardRemoveObject(obj)
+	if not FD.CanUseGameDemolitionPipeline(obj) then
+		return false
+	end
+
+	if FD.IsDome(obj) and type(FD.StagedDemolishDome) == "function" then
+		return FD.StagedDemolishDome(obj)
+	end
+
+	if not FD.StagedDemolishNonDomeObject(obj) then
+		return false
+	end
+
+	return FD.HardRemoveAfterStagedDemolition(obj)
+end
+
+function FD.ShouldTryStagedDemolition(obj)
+	if not FD.IsObjectValid(obj) then
+		return false
+	end
+
+	-- Deposits, markers, orphan visuals, and grid elements are the cases where
+	-- direct hard deletion is usually the intended repair path.
+	if FD.IsResourceDepositObject(obj) or FD.IsMarker(obj) or FD.IsLightDeleteGridElement(obj) then
+		return false
+	end
+
+	return FD.CanUseGameDemolitionPipeline(obj)
+end
+
+
+function FD.IsDomeInteriorDemolitionCandidate(dome, obj)
+	if not FD.IsObjectValid(dome) or not FD.IsObjectValid(obj) then
+		return false
+	end
+
+	if obj == dome then
+		return false
+	end
+
+	if FD.IsProtectedUnit(obj) or FD.IsAnimal(obj) then
+		return false
+	end
+
+	if FD.IsResourceDepositObject(obj) or FD.IsMarker(obj) then
+		return false
+	end
+
+	if FD.IsDomeVisualAttach(obj) or FD.IsComponentLightObject(obj) then
+		return false
+	end
+
+	return FD.CanUseGameDemolitionPipeline(obj)
+end
+
+function FD.AddDomeInteriorDemolitionObject(dome, objects, seen, obj)
+	local passage_obj = FD.PassageObjectFor(obj)
+
+	if passage_obj then
+		obj = passage_obj
+	end
+
+	if not FD.IsDomeInteriorDemolitionCandidate(dome, obj) or seen[obj] then
+		return
+	end
+
+	seen[obj] = true
+	objects[#objects + 1] = obj
+end
+
+function FD.CollectDomeInteriorDemolitionObjects(dome)
+	local objects = {}
+	local seen = {}
+
+	if not FD.IsDome(dome) then
+		return objects
+	end
+
+	local function add(obj)
+		FD.AddDomeInteriorDemolitionObject(dome, objects, seen, obj)
+	end
+
+	-- Most inside-dome buildings are reachable through the dome label table.
+	local labels = FD.ReadField(dome, "labels")
+
+	if type(labels) == "table" then
+		for _, label_list in pairs(labels) do
+			FD.ForEachTableObject(label_list, add, FD.MAX_CONTAINED_LABEL_SCAN)
+		end
+	end
+
+	-- Some builds/versions keep explicit lists instead of, or in addition to,
+	-- labels. Scan the common container fields conservatively.
+	for _, field in ipairs({
+		"buildings",
+		"inside_buildings",
+		"service_buildings",
+		"residence_buildings",
+		"workplace_buildings",
+		"attached_buildings",
+		"children",
+		"elements",
+	}) do
+		FD.ForEachTableObject(FD.ReadField(dome, field), add, FD.MAX_CONTAINED_LABEL_SCAN)
+	end
+
+	-- Final fallback: scan visible city/colony labels for Demolishable objects
+	-- whose dome/parent fields point at this dome. This catches internal
+	-- buildings that were omitted from dome.labels.
+	local containers = {
+		FD.ReadField(dome, "city"),
+		FD.Global("UICity"),
+		FD.Global("MainCity"),
+		FD.Global("SelectedCity"),
+		FD.Global("UIColony"),
+	}
+	local seen_containers = {}
+
+	for _, container in ipairs(containers) do
+		if container and not seen_containers[container] then
+			seen_containers[container] = true
+			local container_labels = FD.ReadField(container, "labels")
+
+			if type(container_labels) == "table" then
+				for _, label_list in pairs(container_labels) do
+					FD.ForEachTableObject(label_list, function(candidate)
+						if FD.ReadField(candidate, "dome") == dome
+							or FD.ReadField(candidate, "parent_dome") == dome
+							or FD.ReadField(candidate, "parent") == dome then
+							add(candidate)
+						end
+					end, FD.MAX_CONTAINED_LABEL_SCAN)
+				end
+			end
+		end
+	end
+
+	return objects
+end
+
+function FD.StagedDemolishDome(dome)
+	if not FD.CanUseGameDemolitionPipeline(dome) then
+		return false
+	end
+
+	-- Remove animals/pets first, then detach colonists. They should not be
+	-- hard-deleted as ordinary contained objects.
+	FD.DeleteContainedAnimals(dome)
+
+	local staged_children = {}
+
+	-- Interior buildings must still be staged through DoDemolish first.  Do not
+	-- remove them until after every interior building has entered the game's own
+	-- demolition path. This preserves the behavior that fixed the dome-interior
+	-- supply-grid problem, then removes the leftover demolished structures.
+	for _, child in ipairs(FD.CollectDomeInteriorDemolitionObjects(dome)) do
+		if FD.StagedDemolishNonDomeObject(child) then
+			staged_children[#staged_children + 1] = child
+		end
+	end
+
+	FD.DetachContainedColonists(dome)
+
+	local dome_demolished = FD.DemolishObjectNowRaw(dome)
+
+	-- Once all interior buildings and the dome have gone through DoDemolish(),
+	-- hard-remove the remaining demolished structures immediately.
+	for _, child in ipairs(staged_children) do
+		FD.HardRemoveAfterStagedDemolition(child)
+	end
+
+	if dome_demolished then
+		return FD.HardRemoveAfterStagedDemolition(dome)
+	end
+
+	return #staged_children > 0
+end
+
+-- Ctrl+Delete: run the normal demolition path when possible.
+function FD.FD_LightDeleteSelectedObject()
+	local obj = FD.LightDeleteTargetObject()
+
+	if not FD.IsObjectValid(obj) then
+		return false
+	end
+
+	local passage_obj = FD.PassageObjectFor(obj)
+
+	if passage_obj then
+		obj = passage_obj
+	end
+
+	-- Passage elements often resolve to the passage controller only after one
+	-- input cycle. Resolve that controller immediately so Ctrl+Delete deletes
+	-- the passage with a single key press instead of requiring a second press.
+	if FD.IsPassageObject(obj) then
+		FD.SafeCall(FD.Global("SelectObj"), false)
+
+		if FD.DemolishObjectNow(obj) then
+			return true
+		end
+
+		return FD.DeleteObject(obj)
+	end
+
+	-- Domes must use the engine demolition pipeline. Direct hard-delete can leave
+	-- stale supply-grid or stockpile state behind. Staged demolition deletes dome
+	-- animals, detaches colonists, and then calls DoDemolish().
+	if FD.IsDome(obj) then
+		return FD.StagedDemolishObject(obj)
+	end
+
+	if FD.DemolishObjectNow(obj) then
+		return true
+	end
+
+	if not FD.IsLightDeleteGridElement(obj) then
+		return false
+	end
+
+	FD.SafeCall(FD.Global("SelectObj"), false)
+	return FD.DeleteObject(obj)
 end
 
 -- Compatibility alias for the original single-file function name.
@@ -2579,8 +3200,11 @@ end
 function FD.PreDeleteCleanup(objects_to_delete)
 	local delete_set = {}
 
+	FD.PatchDroneResourceMethodGuards()
+
 	for _, obj in ipairs(objects_to_delete) do
 		delete_set[obj] = true
+		FD.MarkForceDeleteDetached(obj)
 	end
 
 	-- Prevent queued drone/resource callbacks from running on objects that are
@@ -2599,19 +3223,38 @@ function FD.PreDeleteCleanup(objects_to_delete)
 	end
 end
 
--- Ctrl+Shift+Delete: broad forced deletion with cleanup and collection.
-function FD.FD_HardDeleteSelectedObjects()
-	local selected_objects = FD.SelectedObjects()
+function FD.HardDeleteRootObjects(root_objects)
 	local objects_to_delete = {}
 	local seen = {}
+	local did_staged_demolish = false
 
-	for _, obj in ipairs(selected_objects) do
+	for _, obj in ipairs(root_objects or {}) do
 		if FD.IsObjectValid(obj) then
-			FD.CollectDeleteObjects(obj, objects_to_delete, seen, true)
+			local passage_obj = FD.PassageObjectFor(obj)
+			local root_obj = passage_obj or obj
+
+			-- Hard delete is now staged for live Demolishable objects. First try the
+			-- game's normal DoDemolish transition so grids, requests, labels, and
+			-- building internals are unregistered by engine-owned code. If that path
+			-- is unavailable or fails, fall back to the direct hard-delete collector.
+			if FD.ShouldTryStagedDemolition(root_obj) then
+				if FD.StagedDemolishAndHardRemoveObject(root_obj) then
+					did_staged_demolish = true
+				elseif not FD.IsDome(root_obj) then
+					FD.CollectDeleteObjects(root_obj, objects_to_delete, seen, true)
+				end
+			else
+				FD.CollectDeleteObjects(root_obj, objects_to_delete, seen, true)
+			end
 		end
 	end
 
 	if #objects_to_delete == 0 then
+		if did_staged_demolish then
+			FD.ClearSelection()
+			return true
+		end
+
 		return false
 	end
 
@@ -2638,6 +3281,11 @@ function FD.FD_HardDeleteSelectedObjects()
 	FD.ClearSelection()
 
 	return true
+end
+
+-- Ctrl+Shift+Delete: broad forced deletion with cleanup and collection.
+function FD.FD_HardDeleteSelectedObjects()
+	return FD.HardDeleteRootObjects(FD.SelectedObjects())
 end
 
 -- Compatibility alias for the original single-file function name.
@@ -2743,10 +3391,17 @@ function FD.ChainOnMsg(message_name, handler)
 	end
 end
 
--- Retry shortcut registration after class post-processing.
-FD.ChainOnMsg("ClassesPostprocess", FD.PatchGameShortcuts)
+-- Retry shortcut registration and method guards after class post-processing.
+FD.ChainOnMsg("ClassesPostprocess", function(...)
+	FD.PatchDroneResourceMethodGuards()
+	FD.PatchGameShortcuts(...)
+end)
 
--- Retry shortcut registration after data loading.
-FD.ChainOnMsg("DataLoaded", FD.PatchGameShortcuts)
+-- Retry shortcut registration and method guards after data loading.
+FD.ChainOnMsg("DataLoaded", function(...)
+	FD.PatchDroneResourceMethodGuards()
+	FD.PatchGameShortcuts(...)
+end)
 
+FD.PatchDroneResourceMethodGuards()
 FD.PatchGameShortcuts()
