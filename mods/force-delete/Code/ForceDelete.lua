@@ -236,6 +236,17 @@ local function PassageObjectFor(obj)
 	return IsPassageObject(passage_obj) and passage_obj or false
 end
 
+local function SamePassageTarget(left, right)
+	if left == right then
+		return true
+	end
+
+	local left_passage = PassageObjectFor(left)
+	local right_passage = PassageObjectFor(right)
+
+	return left_passage and right_passage and left_passage == right_passage
+end
+
 local function PreparePassageForDelete(obj)
 	if not IsPassageObject(obj) then
 		return
@@ -246,6 +257,49 @@ local function PreparePassageForDelete(obj)
 	WriteField(obj, "CanDelete", function()
 		return false
 	end)
+end
+
+local function AddPassageRelatedObject(objects, seen, obj)
+	if IsObjectValid(obj) and not seen[obj] then
+		seen[obj] = true
+		objects[#objects + 1] = obj
+	end
+end
+
+local function CollectPassageRelatedObjects(passage)
+	local objects = {}
+	local seen = {}
+
+	if not IsPassageObject(passage) then
+		return objects
+	end
+
+	AddPassageRelatedObject(objects, seen, passage)
+
+	for _, field in ipairs({
+		"elements",
+		"elements_under_construction",
+		"traversing_colonists",
+		"start_el",
+		"end_el",
+	}) do
+		local value = ReadField(passage, field)
+
+		if IsObjectValid(value) then
+			AddPassageRelatedObject(objects, seen, value)
+		elseif type(value) == "table" then
+			for _, obj in ipairs(value) do
+				AddPassageRelatedObject(objects, seen, obj)
+			end
+
+			for key, obj in pairs(value) do
+				AddPassageRelatedObject(objects, seen, key)
+				AddPassageRelatedObject(objects, seen, obj)
+			end
+		end
+	end
+
+	return objects
 end
 
 -- Detect whether an object is a dome floor/terrain visual attachment.
@@ -325,6 +379,30 @@ local function ClearColonistTransportState(colonist)
 		return
 	end
 
+	local holder = ReadField(colonist, "holder")
+
+	if IsObjectValid(holder) then
+		local exit_pos = false
+
+		if type(ReadField(holder, "GetImmediateExitPos")) == "function" then
+			pcall(function()
+				exit_pos = holder:GetImmediateExitPos(colonist)
+			end)
+		end
+
+		if not exit_pos and type(ReadField(holder, "GetPos")) == "function" then
+			pcall(function()
+				exit_pos = holder:GetPos()
+			end)
+		end
+
+		if exit_pos and type(ReadField(colonist, "SetPos")) == "function" then
+			pcall(function()
+				colonist:SetPos(exit_pos)
+			end)
+		end
+	end
+
 	local ticket = ReadField(colonist, "transport_ticket")
 
 	if type(ticket) == "table" then
@@ -333,7 +411,7 @@ local function ClearColonistTransportState(colonist)
 		end
 	end
 
-	RemoveColonistFromTransportObject(ReadField(colonist, "holder"), colonist)
+	RemoveColonistFromTransportObject(holder, colonist)
 
 	local assign_to_service = ReadField(colonist, "AssignToService")
 
@@ -343,6 +421,19 @@ local function ClearColonistTransportState(colonist)
 		end)
 	end
 
+	if type(ReadField(colonist, "ClearPath")) == "function" then
+		pcall(function()
+			colonist:ClearPath()
+		end)
+	end
+
+	-- SetHolder(false) may call OnExitHolder on a holder that hard-delete is
+	-- about to destroy. Clear the raw field like the game's invalid-holder fixup.
+	WriteField(colonist, "holder", false)
+	WriteField(colonist, "lead_in_out", false)
+	WriteField(colonist, "lead_interrupted", true)
+	WriteField(colonist, "visit_end_time", false)
+	WriteField(colonist, "visit_spot_end_time", false)
 	colonist.transport_ticket = false
 	colonist.work_route = false
 	colonist.leave_early_for_work = false
@@ -376,7 +467,7 @@ local function TransportTicketTargetsObject(ticket, obj)
 	end
 
 	for _, field in ipairs({ "src_station", "dst_station", "destination", "vehicle", "param" }) do
-		if ReadField(ticket, field) == obj then
+		if SamePassageTarget(ReadField(ticket, field), obj) then
 			return true
 		end
 	end
@@ -401,7 +492,7 @@ local function ColonistTargetsObject(colonist, obj)
 		"emigration_elevator",
 		"leaving_elevator",
 	}) do
-		if ReadField(colonist, field) == obj then
+		if SamePassageTarget(ReadField(colonist, field), obj) then
 			return true
 		end
 	end
@@ -410,7 +501,27 @@ local function ColonistTargetsObject(colonist, obj)
 		return true
 	end
 
-	return TableContainsObject(ReadField(colonist, "work_route"), obj)
+	if TableContainsObject(ReadField(colonist, "work_route"), obj) then
+		return true
+	end
+
+	local work_route = ReadField(colonist, "work_route")
+
+	if type(work_route) == "table" then
+		for _, route_obj in ipairs(work_route) do
+			if SamePassageTarget(route_obj, obj) then
+				return true
+			end
+		end
+
+		for key, route_obj in pairs(work_route) do
+			if SamePassageTarget(key, obj) or SamePassageTarget(route_obj, obj) then
+				return true
+			end
+		end
+	end
+
+	return false
 end
 
 local function DetachColonistsTargetingObject(obj)
@@ -508,6 +619,7 @@ local function DetachContainedColonists(obj)
 		"cargo_passengers",
 		"crew",
 		"disembarking",
+		"traversing_colonists",
 	}) do
 		local value = ReadField(obj, field)
 
@@ -527,6 +639,16 @@ local function DetachContainedColonists(obj)
 	end
 
 	DetachColonistsTargetingObject(obj)
+
+	local passage_obj = PassageObjectFor(obj)
+
+	if passage_obj == obj then
+		for _, related in ipairs(CollectPassageRelatedObjects(passage_obj)) do
+			if related ~= obj then
+				DetachContainedColonists(related)
+			end
+		end
+	end
 end
 
 local function AddContainedAnimal(animals, seen, obj)
