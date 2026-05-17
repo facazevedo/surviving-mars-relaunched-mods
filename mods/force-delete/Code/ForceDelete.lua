@@ -53,6 +53,18 @@ local function ReadField(obj, field)
 	return ok and value or nil
 end
 
+local function WriteField(obj, field, value)
+	if not obj then
+		return false
+	end
+
+	local ok = pcall(function()
+		obj[field] = value
+	end)
+
+	return ok
+end
+
 -- Call a zero-argument object method safely.
 local function CallMethod(obj, method)
 	local fn = ReadField(obj, method)
@@ -222,11 +234,198 @@ local function IsDomeVisualAttach(obj)
 			or class_name:find("DomeRoadConnection", 1, true) ~= nil)
 end
 
--- Detach colonists from common ownership fields before deleting containers.
-local function DetachColonist(colonist)
+local function RemoveObjectFromTableEntries(list, obj)
+	if type(list) ~= "table" or not obj then
+		return
+	end
+
+	for i = #list, 1, -1 do
+		if list[i] == obj then
+			table.remove(list, i)
+		end
+	end
+
+	for key, value in pairs(list) do
+		if key == obj or value == obj then
+			list[key] = nil
+		end
+	end
+end
+
+local function StopCommandObject(obj)
+	if not IsObjectValid(obj) then
+		return
+	end
+
+	local command_thread = ReadField(obj, "command_thread")
+	local destructor_thread = ReadField(obj, "thread_running_destructors")
+
+	obj.command_destructors = false
+	obj.command_queue = nil
+	obj.forced_cmd_importance = nil
+
+	for _, thread in ipairs({ command_thread, destructor_thread }) do
+		if SafeCall(Global("IsValidThread"), thread) then
+			SafeCall(Global("DeleteThread"), thread, true)
+		end
+	end
+
+	obj.command_thread = nil
+	obj.thread_running_destructors = nil
+	obj.command = false
+end
+
+local function RemoveColonistFromTransportObject(obj, colonist)
+	if not obj then
+		return
+	end
+
+	for _, field in ipairs({
+		"colonists_inbound",
+		"waiting_for_train",
+		"units",
+		"visitors",
+	}) do
+		RemoveObjectFromTableEntries(ReadField(obj, field), colonist)
+	end
+end
+
+local function ClearColonistTransportState(colonist)
 	if not IsColonist(colonist) then
 		return
 	end
+
+	local ticket = ReadField(colonist, "transport_ticket")
+
+	if type(ticket) == "table" then
+		for _, field in ipairs({ "src_station", "dst_station", "vehicle", "destination" }) do
+			RemoveColonistFromTransportObject(ReadField(ticket, field), colonist)
+		end
+	end
+
+	RemoveColonistFromTransportObject(ReadField(colonist, "holder"), colonist)
+
+	local assign_to_service = ReadField(colonist, "AssignToService")
+
+	if type(assign_to_service) == "function" then
+		pcall(function()
+			assign_to_service(colonist, false)
+		end)
+	end
+
+	colonist.transport_ticket = false
+	colonist.work_route = false
+	colonist.leave_early_for_work = false
+end
+
+local DetachColonist
+
+local function TableContainsObject(list, obj)
+	if type(list) ~= "table" or not obj then
+		return false
+	end
+
+	for _, value in ipairs(list) do
+		if value == obj then
+			return true
+		end
+	end
+
+	for key, value in pairs(list) do
+		if key == obj or value == obj then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function TransportTicketTargetsObject(ticket, obj)
+	if type(ticket) ~= "table" then
+		return false
+	end
+
+	for _, field in ipairs({ "src_station", "dst_station", "destination", "vehicle", "param" }) do
+		if ReadField(ticket, field) == obj then
+			return true
+		end
+	end
+
+	return false
+end
+
+local function ColonistTargetsObject(colonist, obj)
+	if not IsColonist(colonist) then
+		return false
+	end
+
+	for _, field in ipairs({
+		"holder",
+		"dome",
+		"workplace",
+		"residence",
+		"reserved_residence",
+		"assigned_to_service",
+		"arriving",
+		"emigration_dome",
+		"emigration_elevator",
+		"leaving_elevator",
+	}) do
+		if ReadField(colonist, field) == obj then
+			return true
+		end
+	end
+
+	if TransportTicketTargetsObject(ReadField(colonist, "transport_ticket"), obj) then
+		return true
+	end
+
+	return TableContainsObject(ReadField(colonist, "work_route"), obj)
+end
+
+local function DetachColonistsTargetingObject(obj)
+	local seen_containers = {}
+
+	for _, container in ipairs({
+		ReadField(obj, "city"),
+		Global("UICity"),
+		Global("MainCity"),
+		Global("SelectedCity"),
+		Global("UIColony"),
+	}) do
+		if container and not seen_containers[container] then
+			seen_containers[container] = true
+
+			local labels = ReadField(container, "labels")
+			local colonists = labels and labels.Colonist
+
+			if type(colonists) == "table" then
+				local scanned = 0
+
+				for _, colonist in ipairs(colonists) do
+					scanned = scanned + 1
+
+					if scanned > MAX_CONTAINED_LABEL_SCAN then
+						break
+					end
+
+					if ColonistTargetsObject(colonist, obj) then
+						DetachColonist(colonist)
+					end
+				end
+			end
+		end
+	end
+end
+
+-- Detach colonists from common ownership fields before deleting containers.
+DetachColonist = function(colonist)
+	if not IsColonist(colonist) then
+		return
+	end
+
+	ClearColonistTransportState(colonist)
+	StopCommandObject(colonist)
 
 	for _, method in ipairs({ "SetWorkplace", "SetResidence", "SetDome" }) do
 		local fn = ReadField(colonist, method)
@@ -271,6 +470,14 @@ local function DetachContainedColonists(obj)
 		"students",
 		"residence_colonists",
 		"service_comfort_workers",
+		"colonists_inbound",
+		"waiting_for_train",
+		"units",
+		"transported_passengers",
+		"cargo_request_passengers",
+		"cargo_passengers",
+		"crew",
+		"disembarking",
 	}) do
 		local value = ReadField(obj, field)
 
@@ -287,6 +494,121 @@ local function DetachContainedColonists(obj)
 		for _, label_list in pairs(labels) do
 			DetachColonistsFromTable(label_list)
 		end
+	end
+
+	DetachColonistsTargetingObject(obj)
+end
+
+local function AddContainedAnimal(animals, seen, obj)
+	if not IsAnimal(obj) or seen[obj] then
+		return
+	end
+
+	seen[obj] = true
+	animals[#animals + 1] = obj
+end
+
+local function CollectAnimalsFromTable(list, animals, seen)
+	if type(list) ~= "table" then
+		return
+	end
+
+	for _, obj in ipairs(list) do
+		AddContainedAnimal(animals, seen, obj)
+	end
+
+	for key, value in pairs(list) do
+		AddContainedAnimal(animals, seen, value)
+		AddContainedAnimal(animals, seen, key)
+	end
+end
+
+local function RemoveAnimalFromTable(list, animal)
+	RemoveObjectFromTableEntries(list, animal)
+end
+
+local function StopAnimalCommand(animal)
+	StopCommandObject(animal)
+end
+
+local function DeleteAnimalNow(animal)
+	if not IsAnimal(animal) then
+		return false
+	end
+
+	local ok = pcall(function()
+		local dome = ReadField(animal, "dome")
+		local pasture = ReadField(animal, "pasture")
+
+		if IsObjectValid(dome) and type(ReadField(dome, "RemoveFromLabel")) == "function" then
+			pcall(function()
+				dome:RemoveFromLabel("Pet", animal)
+			end)
+		end
+
+		if IsObjectValid(pasture) then
+			RemoveAnimalFromTable(ReadField(pasture, "current_herd"), animal)
+			RemoveAnimalFromTable(ReadField(pasture, "animals"), animal)
+		end
+
+		StopAnimalCommand(animal)
+
+		if type(ReadField(animal, "delete")) == "function" then
+			animal:delete()
+			return
+		end
+
+		SafeCall(Global("DoneObject"), animal)
+	end)
+
+	return ok
+end
+
+local function DeleteContainedAnimals(obj)
+	if not IsObjectValid(obj) or IsAnimal(obj) then
+		return
+	end
+
+	local animals, seen = {}, {}
+
+	for _, field in ipairs({
+		"animal",
+		"animals",
+		"pets",
+		"current_herd",
+		"herd",
+		"spawned_animals",
+		"visitors",
+		"children",
+	}) do
+		local value = ReadField(obj, field)
+
+		if IsAnimal(value) then
+			AddContainedAnimal(animals, seen, value)
+		else
+			CollectAnimalsFromTable(value, animals, seen)
+		end
+	end
+
+	local labels = ReadField(obj, "labels")
+
+	if type(labels) == "table" then
+		for _, label_name in ipairs({
+			"Pet",
+			"Animal",
+			"Animals",
+			"BaseAnimal",
+			"BasePet",
+			"RoamingPet",
+			"StaticPet",
+			"PastureAnimal",
+		}) do
+			CollectAnimalsFromTable(labels[label_name], animals, seen)
+		end
+	end
+
+	for _, animal in ipairs(animals) do
+		DeleteAnimalNow(animal)
 	end
 end
 
@@ -735,6 +1057,150 @@ local function PruneObjectFromGlobalLabels(obj)
 	end
 end
 
+local function IsResourceStockpileObject(obj)
+	local class_name = ClassName(obj)
+
+	return IsObjectValid(obj)
+		and (IsKindOf(obj, "ResourceStockpileBase")
+			or IsKindOf(obj, "ResourceStockpile")
+			or class_name:find("ResourceStockpile", 1, true) ~= nil)
+end
+
+local function IsStockpileControllerObject(obj)
+	return IsObjectValid(obj) and type(ReadField(obj, "stockpiles")) == "table"
+end
+
+local function StockpileStoredAmount(stockpile)
+	if not IsObjectValid(stockpile) then
+		return 0
+	end
+
+	local get_stored_amount = ReadField(stockpile, "GetStoredAmount")
+
+	if type(get_stored_amount) == "function" then
+		local ok, amount = pcall(function()
+			return get_stored_amount(stockpile)
+		end)
+
+		if ok and type(amount) == "number" then
+			return amount
+		end
+	end
+
+	local amount = ReadField(stockpile, "stockpiled_amount")
+
+	return type(amount) == "number" and amount or 0
+end
+
+local function PauseResourceProducer(obj)
+	if not IsObjectValid(obj) then
+		return
+	end
+
+	if IsKindOf(obj, "ResourceProducer") or ReadField(obj, "producers") then
+		WriteField(obj, "working", false)
+		WriteField(obj, "last_production_start_ts", false)
+	end
+end
+
+local function PruneStockpileController(controller, delete_set)
+	if not IsStockpileControllerObject(controller) then
+		return
+	end
+
+	local stockpiles = ReadField(controller, "stockpiles")
+	local total_stockpiled = 0
+	local kept = 0
+
+	for i = #stockpiles, 1, -1 do
+		local stockpile = stockpiles[i]
+
+		if delete_set[stockpile] or not IsObjectValid(stockpile) then
+			if IsResourceStockpileObject(stockpile) then
+				WriteField(stockpile, "parent", false)
+				WriteField(stockpile, "destroy_when_empty", true)
+			end
+
+			table.remove(stockpiles, i)
+		else
+			kept = kept + 1
+			total_stockpiled = total_stockpiled + StockpileStoredAmount(stockpile)
+		end
+	end
+
+	for key, stockpile in pairs(stockpiles) do
+		if delete_set[key] or delete_set[stockpile] or not IsObjectValid(stockpile) then
+			stockpiles[key] = nil
+		end
+	end
+
+	if kept <= 0 then
+		WriteField(controller, "stockpiles", {})
+		WriteField(controller, "total_stockpiled", 0)
+		WriteField(controller, "next_stockpile_idx", 1)
+		WriteField(controller, "current_stockpile_idx_stockpiled_amount", 0)
+		return
+	end
+
+	local next_stockpile_idx = ReadField(controller, "next_stockpile_idx")
+
+	if type(next_stockpile_idx) ~= "number" or next_stockpile_idx < 1 or next_stockpile_idx > kept then
+		WriteField(controller, "next_stockpile_idx", 1)
+	end
+
+	WriteField(controller, "total_stockpiled", total_stockpiled)
+	WriteField(controller, "current_stockpile_idx_stockpiled_amount", 0)
+end
+
+local function ForEachProducerController(obj, callback)
+	local visited = {}
+
+	local function visit(controller)
+		if IsObjectValid(controller) and not visited[controller] then
+			visited[controller] = true
+			callback(controller)
+		end
+	end
+
+	visit(obj)
+	visit(ReadField(obj, "wasterock_producer"))
+
+	local producers = ReadField(obj, "producers")
+
+	if type(producers) == "table" then
+		for _, producer in ipairs(producers) do
+			visit(producer)
+		end
+
+		for _, producer in pairs(producers) do
+			visit(producer)
+		end
+	end
+end
+
+local function CleanupStockpileReferences(objects_to_delete, delete_set)
+	for _, obj in ipairs(objects_to_delete) do
+		if IsObjectValid(obj) then
+			PauseResourceProducer(obj)
+
+			ForEachProducerController(obj, function(controller)
+				PruneStockpileController(controller, delete_set)
+				WriteField(controller, "last_production_start_ts", false)
+			end)
+
+			local parent = ReadField(obj, "parent")
+
+			if parent then
+				PruneStockpileController(parent, delete_set)
+			end
+
+			if IsResourceStockpileObject(obj) then
+				WriteField(obj, "parent", false)
+			end
+		end
+	end
+end
+
 -- Detect whether an object is a visible or marker-backed resource deposit.
 local function IsResourceDepositObject(obj)
 	if not IsObjectValid(obj) then
@@ -982,11 +1448,20 @@ local function PruneDeleteLabels(objects_to_delete)
 	end
 end
 
--- Run colonist cleanup before physical objects are deleted.
+-- Run unit cleanup before physical objects are deleted.
 local function PreDeleteCleanup(objects_to_delete)
+	local delete_set = {}
+
+	for _, obj in ipairs(objects_to_delete) do
+		delete_set[obj] = true
+	end
+
+	CleanupStockpileReferences(objects_to_delete, delete_set)
+
 	for _, obj in ipairs(objects_to_delete) do
 		if IsObjectValid(obj) then
 			DetachContainedColonists(obj)
+			DeleteContainedAnimals(obj)
 		end
 	end
 end
