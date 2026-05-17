@@ -450,6 +450,19 @@ function FD.SelectedObject()
 	return objects[1] or false
 end
 
+-- Return the selected object that should drive the inspector panel.
+function FD.SelectedInspectableObject()
+	local objects = FD.SelectedObjects()
+
+	for _, obj in ipairs(objects) do
+		if FD.ObjectType(obj) then
+			return obj
+		end
+	end
+
+	return objects[1] or false
+end
+
 -- Clear active gameplay/editor selection before deleting selected objects.
 function FD.ClearSelection()
 	FD.SafeCall(FD.Global("SelectObj"), false)
@@ -577,7 +590,7 @@ function FD.RefreshSelectionDiagnostics()
 		return
 	end
 
-	local obj = FD.SelectedObject()
+	local obj = FD.SelectedInspectableObject()
 	if obj ~= FD.last_selected_object then
 		FD.last_selected_object = obj
 		FD.shortcut_feedback_active = false
