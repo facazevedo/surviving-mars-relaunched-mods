@@ -1,65 +1,55 @@
--- Force Delete single-file refactor for Surviving Mars Relaunched.
--- Generated from the multi-file refactor, collapsed into one Script.lua.
--- Modes:
---   Ctrl+Delete       / LB+RB+X = light delete.
---   Ctrl+Shift+Delete / LB+RB+Y = hard delete.
+-- Force Delete diagnostic scaffold.
+-- This main script owns shared helpers, selection monitoring, module loading,
+-- and shortcut registration. Object-specific logic lives in fd_* modules.
+
+-- ============================================================================
+-- Namespace and constants
+-- ============================================================================
 
 ForceDelete = rawget(_G, "ForceDelete") or {}
 local FD = ForceDelete
 _G.ForceDelete = FD
 
+FD.LVL1_ACTION_ID = "ForceDelete_Level1_CtrlDelete"
+FD.LVL2_ACTION_ID = "ForceDelete_Level2_CtrlShiftDelete"
+FD.POLL_INTERVAL_MS = 250
+FD.shortcuts_patched = FD.shortcuts_patched or false
+
+local unpack_args = table.unpack or unpack
 
 -- ============================================================================
--- fd_safe.lua
+-- Safe engine helpers
 -- ============================================================================
 
-FD.LIGHT_ACTION_ID = "ForceDelete_CtrlDelete"
-FD.HARD_ACTION_ID = "ForceDelete_CtrlShiftDelete"
-FD.MAX_MARKER_GROUP_SCAN = 32
-FD.MAX_CONTAINED_LABEL_SCAN = 2048
-FD.shortcuts_patched = false
-
--- Return an optional global without creating sandbox assertion noise.
+-- Return a global value without creating it. This keeps all engine integration
+-- defensive because many helpers only exist after specific game/UI phases.
 function FD.Global(name)
 	return rawget(_G, name)
 end
 
--- Run an optional function safely and return false on failure.
+-- Call an arbitrary function safely. Engine objects can assert when touched in
+-- the wrong state, so all generic interaction goes through pcall.
 function FD.SafeCall(fn, ...)
 	if type(fn) ~= "function" then
 		return false
 	end
 
-	local ok, result = pcall(fn, ...)
-	return ok and result or false
-end
+	local args = { ... }
+	local ok, r1, r2, r3, r4, r5 = pcall(function()
+		return fn(unpack_args(args))
+	end)
 
--- Check whether a map/game object is still valid.
-function FD.IsObjectValid(obj)
-	if not obj then
+	if not ok then
 		return false
 	end
 
-	local is_valid = FD.Global("IsValid")
-
-	if type(is_valid) == "function" then
-		return FD.SafeCall(is_valid, obj) and true or false
-	end
-
-	return obj and true or false
+	return r1, r2, r3, r4, r5
 end
 
--- Test an object class relationship through the engine helper when available.
-function FD.IsKindOf(obj, class_name)
-	return FD.IsObjectValid(obj)
-		and FD.SafeCall(FD.Global("IsKindOf"), obj, class_name)
-		and true
-		or false
-end
-
--- Read a field safely from engine userdata/table objects.
+-- Read a field from a Lua table/userdata hybrid without assuming plain-table
+-- behavior. This is used heavily by diagnostic modules.
 function FD.ReadField(obj, field)
-	if not obj then
+	if obj == nil or field == nil then
 		return nil
 	end
 
@@ -67,11 +57,17 @@ function FD.ReadField(obj, field)
 		return obj[field]
 	end)
 
-	return ok and value or nil
+	if ok then
+		return value
+	end
+
+	return nil
 end
 
+-- Write a field defensively. The diagnostic scaffold does not modify selected
+-- objects, but this helper is kept here for future force-delete modules.
 function FD.WriteField(obj, field, value)
-	if not obj then
+	if obj == nil or field == nil then
 		return false
 	end
 
@@ -82,70 +78,97 @@ function FD.WriteField(obj, field, value)
 	return ok
 end
 
--- Call a zero-argument object method safely.
-function FD.CallMethod(obj, method)
-	local fn = FD.ReadField(obj, method)
-
-	if type(fn) ~= "function" then
-		return nil
+-- Invoke an object method safely. This avoids assuming whether a method exists
+-- or whether the backing native object is still in a valid state.
+function FD.CallMethod(obj, method_name, ...)
+	if obj == nil or method_name == nil then
+		return false
 	end
 
-	local ok, value = pcall(function()
-		return fn(obj)
-	end)
-
-	return ok and value or nil
-end
-
--- Return an object's class-like identifier.
-function FD.ClassName(obj)
-	local value = FD.ReadField(obj, "class") or FD.CallMethod(obj, "GetClass")
-	local ok, result = pcall(tostring, value or obj)
-
-	return ok and result or ""
-end
-
--- Read an editor/game property by id when the object supports GetProperty.
-function FD.ReadProperty(obj, prop_id)
-	if not FD.IsObjectValid(obj) or type(FD.ReadField(obj, "GetProperty")) ~= "function" then
-		return nil
-	end
-
-	local ok, value = pcall(function()
-		return obj:GetProperty(prop_id)
-	end)
-
-	return ok and value or nil
-end
-
--- Return the best fallback hex size for local terrain operations.
-function FD.HexSize()
-	local const = FD.Global("const")
-
-	return const and const.HexSize or 1000
-end
-
-function FD.CallObjectMethod(obj, method_name, ...)
 	local method = FD.ReadField(obj, method_name)
-
 	if type(method) ~= "function" then
 		return false
 	end
 
 	local args = { ... }
-	local ok, result = pcall(function()
-		return method(obj, unpack(args))
+	local ok, r1, r2, r3, r4, r5 = pcall(function()
+		return method(obj, unpack_args(args))
 	end)
 
-	return ok and result or false
+	if not ok then
+		return false
+	end
+
+	return r1, r2, r3, r4, r5
 end
 
+-- Validate an object using the engine helper when available. Plain Lua values
+-- fall back to a nil check so diagnostics can still summarize them.
+function FD.IsObjectValid(obj)
+	if obj == nil or obj == false then
+		return false
+	end
 
--- ============================================================================
--- fd_types.lua
--- ============================================================================
+	local is_valid = FD.Global("IsValid")
+	if type(is_valid) == "function" then
+		local ok, result = pcall(is_valid, obj)
+		if ok then
+			return result and true or false
+		end
+	end
 
--- Match an object by engine class relationship or by class-name substring.
+	return true
+end
+
+-- Check engine inheritance using IsKindOf when present. The fallback is exact
+-- class-name equality; substring matching belongs in ObjectMatches.
+function FD.IsKindOf(obj, class_name)
+	if obj == nil or class_name == nil then
+		return false
+	end
+
+	local is_kind_of = FD.Global("IsKindOf")
+	if type(is_kind_of) == "function" then
+		local ok, result = pcall(is_kind_of, obj, class_name)
+		if ok and result then
+			return true
+		end
+	end
+
+	return FD.ClassName(obj) == class_name
+end
+
+-- Return the most useful class identifier available for an object-like value.
+function FD.ClassName(obj)
+	if obj == nil then
+		return "nil"
+	end
+
+	local class = FD.ReadField(obj, "class")
+	if class ~= nil then
+		return FD.SafeToString(class)
+	end
+
+	local class_name = FD.ReadField(obj, "class_name")
+	if class_name ~= nil then
+		return FD.SafeToString(class_name)
+	end
+
+	local meta_class = FD.CallMethod(obj, "GetClass")
+	if meta_class ~= false and meta_class ~= nil then
+		return FD.SafeToString(meta_class)
+	end
+
+	local value_type = type(obj)
+	if value_type == "table" or value_type == "userdata" then
+		return value_type
+	end
+
+	return value_type
+end
+
+-- Match an object by engine kind first, then by compact class-name substring.
+-- This supports mods across engine revisions with slightly different class IDs.
 function FD.ObjectMatches(obj, kind_names, class_patterns)
 	if not FD.IsObjectValid(obj) then
 		return false
@@ -158,9 +181,8 @@ function FD.ObjectMatches(obj, kind_names, class_patterns)
 	end
 
 	local class_name = FD.ClassName(obj)
-
 	for _, pattern in ipairs(class_patterns or {}) do
-		if class_name:find(pattern, 1, true) ~= nil then
+		if type(pattern) == "string" and class_name:find(pattern, 1, true) then
 			return true
 		end
 	end
@@ -168,336 +190,150 @@ function FD.ObjectMatches(obj, kind_names, class_patterns)
 	return false
 end
 
-function FD.IsColonist(obj)
-	return FD.ObjectMatches(obj, { "Colonist" }, { "Colonist" })
-end
-
-function FD.IsAnimal(obj)
-	return FD.ObjectMatches(
-		obj,
-		{ "BaseAnimal", "BasePet", "Pet", "PastureAnimal" },
-		{ "Animal", "Pet" }
-	)
-end
-
-function FD.IsDroneObject(obj)
-	return FD.ObjectMatches(obj, { "Drone" }, { "Drone" })
-end
-
--- Detect live units that should not be pulled in by container recursion.
-function FD.IsProtectedUnit(obj)
-	return FD.IsColonist(obj)
-		or FD.IsAnimal(obj)
-		or FD.ObjectMatches(
-			obj,
-			{ "Unit", "Drone", "BaseRover", "BaseRobot" },
-			{ "Rover", "Drone" }
-		)
-end
-
-function FD.IsDome(obj)
-	return FD.ObjectMatches(obj, { "Dome" }, { "Dome" })
-end
-
-function FD.IsPassageObject(obj)
-	return FD.ObjectMatches(obj, { "PassageBase" }, { "Passage" })
-		and type(FD.ReadField(obj, "elements")) == "table"
-end
-
-function FD.IsDomeVisualAttach(obj)
-	return FD.ObjectMatches(
-		obj,
-		{ "BakedDomeDecal", "BakedDomeDecalLarge", "DomeTerrain", "DomeGrass", "DomeRoadConnection" },
-		{ "BakedDomeDecal", "DomeTerrain", "DomeGrass", "DomeRoadConnection" }
-	)
-end
-
-function FD.IsComponentLightObject(obj)
-	return FD.ObjectMatches(obj, { "ComponentLight" }, { "ComponentLight" })
-end
-
-function FD.IsMarker(obj)
-	return FD.ObjectMatches(
-		obj,
-		{ "DepositMarker", "SurfaceDepositMarker", "SubsurfaceDepositMarker" },
-		{ "DepositMarker" }
-	)
-end
-
-function FD.IsResourceStockpileObject(obj)
-	return FD.ObjectMatches(
-		obj,
-		{ "ResourceStockpileBase", "ResourceStockpile" },
-		{ "ResourceStockpile" }
-	)
-end
-
-function FD.IsStockpileControllerObject(obj)
-	return FD.IsObjectValid(obj) and type(FD.ReadField(obj, "stockpiles")) == "table"
-end
-
-function FD.IsResourceDepositObject(obj)
-	if not FD.IsObjectValid(obj) then
-		return false
+-- Convert simple values to text without recursively dumping object graphs.
+function FD.SafeToString(value)
+	if value == nil then
+		return "nil"
 	end
 
-	return FD.IsMarker(obj)
-		or FD.ObjectMatches(
-			obj,
-			{ "TerrainDeposit", "SurfaceDeposit", "SubsurfaceDeposit" },
-			{ "Deposit", "Concrete", "Metals", "Polymers", "PreciousMetals" }
-		)
+	local value_type = type(value)
+	if value_type == "string" then
+		return value
+	end
+
+	if value_type == "number" or value_type == "boolean" then
+		return tostring(value)
+	end
+
+	local ok, text = pcall(tostring, value)
+	if ok and text ~= nil then
+		return text
+	end
+
+	return value_type
 end
 
--- Keep light force-delete away from live units; hard delete handles these explicitly.
-function FD.IsLightDeleteProtected(obj)
-	return FD.IsColonist(obj) or FD.IsAnimal(obj) or FD.IsDroneObject(obj)
-end
+-- Produce a compact one-line summary for object-like values. This is the core
+-- formatting helper used by modules to avoid large recursive dumps.
+function FD.ObjectSummary(obj)
+	if obj == nil then
+		return "nil"
+	end
 
--- Detect grid pieces that should be allowed through the light-delete shortcut.
-function FD.IsLightDeleteGridElement(obj)
-	return FD.ObjectMatches(
-		obj,
-		{ "ElectricityGridElement", "LifeSupportGridElement" },
-		{ "ElectricityGridElement", "LifeSupportGridElement" }
-	)
-end
+	local value_type = type(obj)
+	if value_type == "string" or value_type == "number" or value_type == "boolean" then
+		return FD.SafeToString(obj)
+	end
 
+	if value_type ~= "table" and value_type ~= "userdata" then
+		return value_type
+	end
+
+	local class_name = FD.ClassName(obj)
+	local name = FD.ReadField(obj, "display_name")
+	if name == nil then
+		name = FD.ReadField(obj, "name")
+	end
+	if name == nil then
+		name = FD.CallMethod(obj, "GetDisplayName")
+	end
+	if name == false or name == nil then
+		name = FD.CallMethod(obj, "GetName")
+	end
+
+	local ids = {}
+	local handle = FD.ReadField(obj, "handle")
+	if handle ~= nil then
+		ids[#ids + 1] = "handle=" .. FD.SafeToString(handle)
+	end
+	local id = FD.ReadField(obj, "id")
+	if id ~= nil then
+		ids[#ids + 1] = "id=" .. FD.SafeToString(id)
+	end
+	local index = FD.ReadField(obj, "index")
+	if index == nil then
+		index = FD.ReadField(obj, "Index")
+	end
+	if index ~= nil then
+		ids[#ids + 1] = "index=" .. FD.SafeToString(index)
+	end
+
+	local text = class_name
+	if name ~= nil and name ~= false and FD.SafeToString(name) ~= "" then
+		text = text .. " / " .. FD.SafeToString(name)
+	end
+	if #ids > 0 then
+		text = text .. " [" .. table.concat(ids, ", ") .. "]"
+	end
+
+	return text
+end
 
 -- ============================================================================
--- fd_tables.lua
+-- Selection helpers
 -- ============================================================================
 
--- Visit valid object-like keys and values in array-style and hash-style engine tables.
-function FD.ForEachTableObject(list, callback, max_scan)
-	if type(list) ~= "table" or type(callback) ~= "function" then
-		return
-	end
-
-	local scanned = 0
-	local visited = {}
-
-	local function visit(obj)
-		if FD.IsObjectValid(obj) and not visited[obj] then
-			visited[obj] = true
-			callback(obj)
-		end
-	end
-
-	for _, value in ipairs(list) do
-		scanned = scanned + 1
-
-		if max_scan and scanned > max_scan then
-			return
-		end
-
-		visit(value)
-	end
-
-	for key, value in pairs(list) do
-		scanned = scanned + 1
-
-		if max_scan and scanned > max_scan then
-			return
-		end
-
-		visit(key)
-		visit(value)
-	end
-end
-
-function FD.RemoveObjectFromTable(list, obj, max_scan)
-	if type(list) ~= "table" or not obj then
-		return
-	end
-
-	local limit = max_scan or FD.MAX_CONTAINED_LABEL_SCAN or #list
-
-	for i = math.min(#list, limit), 1, -1 do
-		if list[i] == obj then
-			table.remove(list, i)
-		end
-	end
-
-	local scanned = 0
-
-	for key, value in pairs(list) do
-		scanned = scanned + 1
-
-		if max_scan and scanned > max_scan then
-			return
-		end
-
-		if key == obj or value == obj then
-			list[key] = nil
-		end
-	end
-end
-
-function FD.RemoveObjectFromTableEntries(list, obj)
-	FD.RemoveObjectFromTable(list, obj)
-end
-
-function FD.TableContainsObject(list, obj, comparator)
-	if type(list) ~= "table" or not obj then
-		return false
-	end
-
-	local found = false
-	local function same(candidate)
-		if comparator then
-			return comparator(candidate, obj)
-		end
-		return candidate == obj
-	end
-
-	FD.ForEachTableObject(list, function(candidate)
-		if same(candidate) then
-			found = true
-		end
-	end, FD.MAX_CONTAINED_LABEL_SCAN)
-
-	return found
-end
-
-function FD.AddUniqueObject(list, obj)
-	if not FD.IsObjectValid(obj) then
-		return
-	end
-
-	for _, existing in ipairs(list) do
-		if existing == obj then
-			return
-		end
-	end
-
-	list[#list + 1] = obj
-end
-
-function FD.MarkObject(seen, obj)
-	if not FD.IsObjectValid(obj) or seen[obj] then
-		return false
-	end
-
-	seen[obj] = true
-	return true
-end
-
-function FD.CollectMatchingObjectsFromTable(list, output, seen, predicate)
-	FD.ForEachTableObject(list, function(obj)
-		if predicate(obj) and not seen[obj] then
-			seen[obj] = true
-			output[#output + 1] = obj
-		end
-	end, FD.MAX_CONTAINED_LABEL_SCAN)
-end
-
-function FD.PruneLabelList(label_list, delete_set, prune_invalid)
-	if type(label_list) ~= "table" then
-		return
-	end
-
-	for i = math.min(#label_list, FD.MAX_CONTAINED_LABEL_SCAN), 1, -1 do
-		local obj = label_list[i]
-
-		if delete_set[obj] or prune_invalid and not FD.IsObjectValid(obj) then
-			table.remove(label_list, i)
-		end
-	end
-
-	local scanned = 0
-
-	for key, value in pairs(label_list) do
-		scanned = scanned + 1
-
-		if scanned > FD.MAX_CONTAINED_LABEL_SCAN then
-			return
-		end
-
-		if delete_set[key] or delete_set[value] then
-			label_list[key] = nil
-		end
-	end
-end
-
-function FD.PruneLabelsTable(labels, delete_set, prune_invalid)
-	if type(labels) ~= "table" then
-		return
-	end
-
-	local scanned = 0
-
-	for _, label_list in pairs(labels) do
-		scanned = scanned + 1
-
-		if scanned > FD.MAX_CONTAINED_LABEL_SCAN then
-			return
-		end
-
-		FD.PruneLabelList(label_list, delete_set, prune_invalid)
-	end
-end
-
-function FD.PruneObjectFromContainerLabels(container, obj)
-	local labels = FD.ReadField(container, "labels")
-
-	if type(labels) ~= "table" then
-		return
-	end
-
-	FD.PruneLabelsTable(labels, { [obj] = true }, false)
-end
-
-function FD.PruneObjectsFromGlobalLabels(delete_set)
-	local containers = {
-		FD.Global("UICity"),
-		FD.Global("MainCity"),
-		FD.Global("SelectedCity"),
-		FD.Global("UIColony"),
-	}
-
-	for _, container in ipairs(containers) do
-		if container then
-			FD.PruneLabelsTable(FD.ReadField(container, "labels"), delete_set, false)
-		end
-	end
-end
-
-function FD.PruneObjectFromGlobalLabels(obj)
-	FD.PruneObjectsFromGlobalLabels({ [obj] = true })
-end
-
-function FD.ForEachContainedEntry(list, callback)
-	FD.ForEachTableObject(list, callback, FD.MAX_CONTAINED_LABEL_SCAN)
-end
-
-
--- ============================================================================
--- fd_selection.lua
--- ============================================================================
-
+-- Resolve UI contexts to the actual selected object when the game wraps it in
+-- an infopanel or property object.
 function FD.ResolveContext(context)
-	if not context then
+	if context == nil or context == false then
 		return false
 	end
 
-	return FD.SafeCall(FD.Global("ResolvePropObj"), context) or context
+	local resolve_prop_obj = FD.Global("ResolvePropObj")
+	if type(resolve_prop_obj) == "function" then
+		local resolved = FD.SafeCall(resolve_prop_obj, context)
+		if FD.IsObjectValid(resolved) then
+			return resolved
+		end
+	end
+
+	for _, field in ipairs({ "context", "obj", "object", "selected_obj", "SelectedObj" }) do
+		local value = FD.ReadField(context, field)
+		if FD.IsObjectValid(value) then
+			return value
+		end
+	end
+
+	if FD.IsObjectValid(context) then
+		return context
+	end
+
+	return false
 end
 
+-- Extract a context object from a dialog without assuming a specific UI tree.
 function FD.ContextObjectFromDialog(dialog)
-	if not dialog then
+	if dialog == nil then
 		return false
 	end
 
-	local context = FD.ReadField(dialog, "context") or FD.CallMethod(dialog, "GetContext") or FD.ReadField(dialog, "Context")
-	local obj = FD.ResolveContext(context)
+	local context = FD.ReadField(dialog, "context")
+	local resolved = FD.ResolveContext(context)
+	if resolved then
+		return resolved
+	end
 
-	return FD.IsObjectValid(obj) and obj or false
+	context = FD.CallMethod(dialog, "GetContext")
+	resolved = FD.ResolveContext(context)
+	if resolved then
+		return resolved
+	end
+
+	for _, child_id in ipairs({ "idInfopanel", "idSelection", "idContent", "idList" }) do
+		local child = FD.ReadField(dialog, child_id)
+		resolved = FD.ResolveContext(FD.ReadField(child, "context"))
+		if resolved then
+			return resolved
+		end
+	end
+
+	return false
 end
 
+-- Return only valid object-like values from an array-style selection list.
 function FD.ValidObjectsFromArray(list)
 	local objects = {}
-
 	if type(list) ~= "table" then
 		return objects
 	end
@@ -511,2897 +347,427 @@ function FD.ValidObjectsFromArray(list)
 	return objects
 end
 
+-- Gather selected objects from the common game/editor selection sources.
 function FD.SelectedObjects()
-	local objects = FD.ValidObjectsFromArray(FD.Global("Selection"))
+	local objects = {}
+	local seen = {}
 
-	if #objects > 1 then
-		return objects
+	-- Add a selected object once while preserving selection-source priority.
+	local function add(obj)
+		if FD.IsObjectValid(obj) and not seen[obj] then
+			seen[obj] = true
+			objects[#objects + 1] = obj
+		end
 	end
 
-	local infopanel = FD.SafeCall(FD.Global("GetDialog"), "Infopanel")
-	local obj = FD.ContextObjectFromDialog(infopanel)
+	add(FD.Global("SelectedObj"))
 
-	if obj then
-		return { obj }
+	for _, obj in ipairs(FD.ValidObjectsFromArray(FD.Global("Selection"))) do
+		add(obj)
 	end
 
-	obj = FD.Global("SelectedObj")
-
-	if FD.IsObjectValid(obj) then
-		return { obj }
-	end
-
-	if #objects == 1 then
-		return objects
+	local get_dialog = FD.Global("GetDialog")
+	if type(get_dialog) == "function" then
+		add(FD.ContextObjectFromDialog(FD.SafeCall(get_dialog, "Infopanel")))
+		add(FD.ContextObjectFromDialog(FD.SafeCall(get_dialog, "InGameInterface")))
 	end
 
 	local editor = FD.Global("editor")
-
-	if editor and type(editor.GetSel) == "function" then
-		objects = FD.ValidObjectsFromArray(FD.SafeCall(editor.GetSel))
-
-		if #objects > 0 then
-			return objects
+	local get_sel = FD.ReadField(editor, "GetSel")
+	if type(get_sel) == "function" then
+		local editor_selection = FD.SafeCall(function()
+			return get_sel(editor)
+		end)
+		for _, obj in ipairs(FD.ValidObjectsFromArray(editor_selection)) do
+			add(obj)
 		end
 	end
 
 	local selo = FD.Global("selo")
-
 	if type(selo) == "function" then
-		obj = FD.SafeCall(selo)
-
-		if FD.IsObjectValid(obj) then
-			return { obj }
-		end
-	end
-
-	return {}
-end
-
-function FD.HasSelectedObject()
-	if FD.IsObjectValid(FD.Global("SelectedObj")) then
-		return true
-	end
-
-	return #FD.SelectedObjects() > 0
-end
-
-function FD.ClearSelection()
-	FD.SafeCall(FD.Global("SelectObj"), false)
-
-	local editor = FD.Global("editor")
-
-	if editor and type(editor.ClearSel) == "function" then
-		pcall(function()
-			editor.ClearSel()
-		end)
-	end
-end
-
--- Return whether an object can be safely tracked by XEditorUndo.
-
-function FD.IsHudVisible()
-	local hud = FD.SafeCall(FD.Global("GetHUD"))
-
-	return hud and type(hud.GetVisible) == "function" and hud:GetVisible()
-end
-
--- Register the bindable delete actions in the game shortcut container.
-
-
--- ============================================================================
--- fd_collect.lua
--- ============================================================================
-
-function FD.PassageObjectFor(obj)
-	if FD.IsPassageObject(obj) then
-		return obj
-	end
-
-	local passage_obj = FD.ReadField(obj, "passage_obj")
-
-	return FD.IsPassageObject(passage_obj) and passage_obj or false
-end
-
-function FD.HasPassageReference(obj)
-	return FD.IsObjectValid(obj)
-		and (type(FD.ReadField(obj, "elements")) == "table" or FD.ReadField(obj, "passage_obj") ~= nil)
-end
-
-function FD.SamePassageTarget(left, right)
-	if left == right then
-		return true
-	end
-
-	if not FD.HasPassageReference(left) or not FD.HasPassageReference(right) then
-		return false
-	end
-
-	local left_passage = FD.PassageObjectFor(left)
-	local right_passage = FD.PassageObjectFor(right)
-
-	return left_passage and right_passage and left_passage == right_passage
-end
-
-function FD.PreparePassageForDelete(obj)
-	if not FD.IsPassageObject(obj) then
-		return
-	end
-
-	-- Passage elements ask the passage whether it can delete itself while the
-	-- passage is already being deleted. Keep them from DoneObject-ing it twice.
-	FD.WriteField(obj, "CanDelete", function()
-		return false
-	end)
-end
-
-function FD.AddPassageRelatedObject(objects, seen, obj)
-	if FD.IsObjectValid(obj) and not seen[obj] then
-		seen[obj] = true
-		objects[#objects + 1] = obj
-	end
-end
-
-function FD.CollectPassageRelatedObjects(passage)
-	local objects = {}
-	local seen = {}
-
-	if not FD.IsPassageObject(passage) then
-		return objects
-	end
-
-	FD.AddPassageRelatedObject(objects, seen, passage)
-
-	for _, field in ipairs({
-		"elements",
-		"elements_under_construction",
-		"traversing_colonists",
-		"start_el",
-		"end_el",
-	}) do
-		local value = FD.ReadField(passage, field)
-
-		if FD.IsObjectValid(value) then
-			FD.AddPassageRelatedObject(objects, seen, value)
-		elseif type(value) == "table" then
-			for _, obj in ipairs(value) do
-				FD.AddPassageRelatedObject(objects, seen, obj)
-			end
-
-			for key, obj in pairs(value) do
-				FD.AddPassageRelatedObject(objects, seen, key)
-				FD.AddPassageRelatedObject(objects, seen, obj)
-			end
-		end
+		local obj = FD.SafeCall(selo)
+		add(obj)
 	end
 
 	return objects
 end
 
--- Detect whether an object is a dome floor/terrain visual attachment.
-
-function FD.MarkerCandidate(obj, key)
-	local candidate = FD.ReadField(obj, key) or FD.ReadProperty(obj, key)
-
-	return FD.IsObjectValid(candidate) and candidate or false
+-- Return the primary selected object, if any.
+function FD.SelectedObject()
+	local objects = FD.SelectedObjects()
+	return objects[1] or false
 end
-
-function FD.FindMarker(obj, visited)
-	if not FD.IsObjectValid(obj) then
-		return false
-	end
-
-	if FD.IsMarker(obj) then
-		return obj
-	end
-
-	visited = visited or {}
-
-	if visited[obj] then
-		return false
-	end
-
-	visited[obj] = true
-
-	for _, key in ipairs({ "marker", "placed_obj" }) do
-		local candidate = FD.MarkerCandidate(obj, key)
-
-		if candidate then
-			return candidate
-		end
-	end
-
-	local deposit = FD.CallMethod(obj, "GetDeposit")
-
-	if FD.IsObjectValid(deposit) then
-		return deposit
-	end
-
-	local group = FD.ReadField(obj, "group")
-
-	if type(group) == "table" then
-		local scanned = 0
-
-		for _, group_obj in ipairs(group) do
-			scanned = scanned + 1
-
-			if scanned > FD.MAX_MARKER_GROUP_SCAN then
-				break
-			end
-
-			local marker = FD.FindMarker(group_obj, visited)
-
-			if FD.IsObjectValid(marker) then
-				return marker
-			end
-		end
-	end
-
-	return false
-end
-
-function FD.CollectResourceDepositObjects(obj, objects, seen)
-	if not FD.IsObjectValid(obj) then
-		return
-	end
-
-	if not FD.MarkObject(seen, obj) then
-		return
-	end
-
-	FD.AddUniqueObject(objects, obj)
-
-	local marker = FD.FindMarker(obj)
-
-	if FD.IsObjectValid(marker) and marker ~= obj then
-		FD.AddUniqueObject(objects, marker)
-	end
-
-	local candidate_fields = {
-		"marker",
-		"placed_obj",
-		"deposit",
-		"deposits",
-		"group",
-		"objects",
-		"resources",
-		"markers",
-		"surface",
-		"subsurface",
-		"deep",
-		"pieces",
-	}
-
-	for _, field in ipairs(candidate_fields) do
-		local value = FD.ReadField(obj, field) or FD.ReadProperty(obj, field)
-
-		if FD.IsObjectValid(value) and value ~= obj then
-			if FD.IsResourceDepositObject(value) or FD.IsMarker(value) then
-				FD.CollectResourceDepositObjects(value, objects, seen)
-			end
-		elseif type(value) == "table" then
-			FD.ForEachContainedEntry(value, function(child)
-				if child ~= obj and (FD.IsResourceDepositObject(child) or FD.IsMarker(child)) then
-					FD.CollectResourceDepositObjects(child, objects, seen)
-				end
-			end)
-		end
-	end
-end
-
-function FD.CollectContainedObjects(container, objects, seen)
-	local labels = FD.ReadField(container, "labels")
-
-	if type(labels) ~= "table" then
-		return
-	end
-
-	for _, label_list in pairs(labels) do
-		FD.ForEachContainedEntry(label_list, function(child)
-			if child ~= container and not FD.IsProtectedUnit(child) then
-				FD.CollectDeleteObjects(child, objects, seen, false)
-			end
-		end)
-	end
-end
-
-FD.CollectDeleteObjects = function(obj, objects, seen, is_root)
-	if FD.IsProtectedUnit(obj) and not is_root then
-		return
-	end
-
-	local passage_obj = FD.PassageObjectFor(obj)
-
-	if passage_obj and passage_obj ~= obj then
-		FD.CollectDeleteObjects(passage_obj, objects, seen, is_root)
-		return
-	end
-
-	if FD.IsResourceDepositObject(obj) or FD.IsMarker(obj) then
-		FD.CollectResourceDepositObjects(obj, objects, seen)
-		return
-	end
-
-	if not FD.MarkObject(seen, obj) then
-		return
-	end
-
-	if not FD.IsProtectedUnit(obj) then
-		FD.CollectContainedObjects(obj, objects, seen)
-	end
-
-	FD.AddUniqueObject(objects, obj)
-
-	if not FD.IsProtectedUnit(obj) then
-		local marker = FD.FindMarker(obj)
-
-		if FD.IsObjectValid(marker) and marker ~= obj then
-			FD.AddUniqueObject(objects, marker)
-		end
-	end
-end
-
 
 -- ============================================================================
--- fd_cleanup_colonists.lua
+-- Message chaining
 -- ============================================================================
 
-function FD.RemoveColonistFromTransportObject(obj, colonist)
-	if not obj then
-		return
-	end
-
-	for _, field in ipairs({
-		"colonists_inbound",
-		"waiting_for_train",
-		"units",
-		"visitors",
-	}) do
-		FD.RemoveObjectFromTableEntries(FD.ReadField(obj, field), colonist)
-	end
-end
-
-function FD.ClearColonistTransportState(colonist)
-	if not FD.IsColonist(colonist) then
-		return
-	end
-
-	local holder = FD.ReadField(colonist, "holder")
-
-	if FD.IsObjectValid(holder) then
-		local exit_pos = false
-
-		if type(FD.ReadField(holder, "GetImmediateExitPos")) == "function" then
-			pcall(function()
-				exit_pos = holder:GetImmediateExitPos(colonist)
-			end)
-		end
-
-		if not exit_pos and type(FD.ReadField(holder, "GetPos")) == "function" then
-			pcall(function()
-				exit_pos = holder:GetPos()
-			end)
-		end
-
-		if exit_pos and type(FD.ReadField(colonist, "SetPos")) == "function" then
-			pcall(function()
-				colonist:SetPos(exit_pos)
-			end)
-		end
-	end
-
-	local ticket = FD.ReadField(colonist, "transport_ticket")
-
-	if type(ticket) == "table" then
-		for _, field in ipairs({ "src_station", "dst_station", "vehicle", "destination" }) do
-			FD.RemoveColonistFromTransportObject(FD.ReadField(ticket, field), colonist)
-		end
-	end
-
-	FD.RemoveColonistFromTransportObject(holder, colonist)
-
-	local assign_to_service = FD.ReadField(colonist, "AssignToService")
-
-	if type(assign_to_service) == "function" then
-		pcall(function()
-			assign_to_service(colonist, false)
-		end)
-	end
-
-	if type(FD.ReadField(colonist, "ClearPath")) == "function" then
-		pcall(function()
-			colonist:ClearPath()
-		end)
-	end
-
-	-- SetHolder(false) may call OnExitHolder on a holder that hard-delete is
-	-- about to destroy. Clear the raw field like the game's invalid-holder fixup.
-	FD.WriteField(colonist, "holder", false)
-	FD.WriteField(colonist, "lead_in_out", false)
-	FD.WriteField(colonist, "lead_interrupted", true)
-	FD.WriteField(colonist, "visit_end_time", false)
-	FD.WriteField(colonist, "visit_spot_end_time", false)
-	colonist.transport_ticket = false
-	colonist.work_route = false
-	colonist.leave_early_for_work = false
-end
-
-function FD.TransportTicketTargetsObject(ticket, obj)
-	if type(ticket) ~= "table" then
+-- Chain an OnMsg handler without discarding handlers installed by the game or
+-- other mods. Keys make repeated module loads idempotent.
+function FD.ChainOnMsg(message_name, key, handler)
+	local on_msg = FD.Global("OnMsg")
+	if type(on_msg) ~= "table" or type(handler) ~= "function" then
 		return false
 	end
 
-	for _, field in ipairs({ "src_station", "dst_station", "destination", "vehicle", "param" }) do
-		if FD.SamePassageTarget(FD.ReadField(ticket, field), obj) then
-			return true
-		end
-	end
-
-	return false
-end
-
-function FD.ColonistTargetsObject(colonist, obj)
-	if not FD.IsColonist(colonist) then
-		return false
-	end
-
-	for _, field in ipairs({
-		"holder",
-		"dome",
-		"workplace",
-		"residence",
-		"reserved_residence",
-		"assigned_to_service",
-		"arriving",
-		"emigration_dome",
-		"emigration_elevator",
-		"leaving_elevator",
-	}) do
-		if FD.SamePassageTarget(FD.ReadField(colonist, field), obj) then
-			return true
-		end
-	end
-
-	if FD.TransportTicketTargetsObject(FD.ReadField(colonist, "transport_ticket"), obj) then
+	FD.onmsg_chained = FD.onmsg_chained or {}
+	FD.onmsg_chained[message_name] = FD.onmsg_chained[message_name] or {}
+	if FD.onmsg_chained[message_name][key] then
 		return true
 	end
 
-	if FD.TableContainsObject(FD.ReadField(colonist, "work_route"), obj) then
-		return true
+	local previous = on_msg[message_name]
+
+	-- Wrap the previous handler and the new handler so one failing hook does not
+	-- take down later diagnostic refreshes.
+	on_msg[message_name] = function(...)
+		if type(previous) == "function" then
+			pcall(previous, ...)
+		end
+		pcall(handler, ...)
 	end
 
-	local work_route = FD.ReadField(colonist, "work_route")
-
-	if type(work_route) == "table" then
-		for _, route_obj in ipairs(work_route) do
-			if FD.SamePassageTarget(route_obj, obj) then
-				return true
-			end
-		end
-
-		for key, route_obj in pairs(work_route) do
-			if FD.SamePassageTarget(key, obj) or FD.SamePassageTarget(route_obj, obj) then
-				return true
-			end
-		end
-	end
-
-	return false
+	FD.onmsg_chained[message_name][key] = true
+	return true
 end
-
-function FD.DetachColonistsTargetingObject(obj)
-	local seen_containers = {}
-
-	for _, container in ipairs({
-		FD.ReadField(obj, "city"),
-		FD.Global("UICity"),
-		FD.Global("MainCity"),
-		FD.Global("SelectedCity"),
-		FD.Global("UIColony"),
-	}) do
-		if container and not seen_containers[container] then
-			seen_containers[container] = true
-
-			local labels = FD.ReadField(container, "labels")
-			local colonists = labels and labels.Colonist
-
-			if type(colonists) == "table" then
-				local scanned = 0
-
-				for _, colonist in ipairs(colonists) do
-					scanned = scanned + 1
-
-					if scanned > FD.MAX_CONTAINED_LABEL_SCAN then
-						break
-					end
-
-					if FD.ColonistTargetsObject(colonist, obj) then
-						FD.DetachColonist(colonist)
-					end
-				end
-			end
-		end
-	end
-end
-
-function FD.NeutralizeColonistStatusSigns(colonist)
-	if not FD.IsColonist(colonist) then
-		return
-	end
-
-	if type(FD.ReadField(colonist, "DestroyAttaches")) == "function" then
-		pcall(function()
-			colonist:DestroyAttaches("UnitSign")
-		end)
-	end
-
-	FD.WriteField(colonist, "status_effect_sign", false)
-	FD.WriteField(colonist, "status_effect_sign_visible", false)
-	FD.WriteField(colonist, "status_effects", {})
-end
-
--- Detach colonists from common ownership fields before deleting containers.
-
-FD.DetachColonist = function(colonist)
-	if not FD.IsColonist(colonist) then
-		return
-	end
-
-	FD.NeutralizeColonistStatusSigns(colonist)
-	FD.ClearColonistTransportState(colonist)
-	FD.StopCommandObject(colonist)
-
-	for _, method in ipairs({ "SetWorkplace", "SetResidence", "SetDome" }) do
-		local fn = FD.ReadField(colonist, method)
-
-		if type(fn) == "function" then
-			pcall(function()
-				fn(colonist, false)
-			end)
-		end
-	end
-end
-
-function FD.DetachColonistsFromTable(list)
-	if type(list) ~= "table" then
-		return
-	end
-
-	for _, obj in ipairs(list) do
-		FD.DetachColonist(obj)
-	end
-
-	for key, value in pairs(list) do
-		FD.DetachColonist(value)
-		FD.DetachColonist(key)
-	end
-end
-
-function FD.DetachContainedColonists(obj)
-	if FD.IsColonist(obj) then
-		FD.DetachColonist(obj)
-		return
-	end
-
-	for _, field in ipairs({
-		"workers",
-		"colonists",
-		"residents",
-		"occupants",
-		"children",
-		"visitors",
-		"patients",
-		"students",
-		"residence_colonists",
-		"service_comfort_workers",
-		"colonists_inbound",
-		"waiting_for_train",
-		"units",
-		"transported_passengers",
-		"cargo_request_passengers",
-		"cargo_passengers",
-		"crew",
-		"disembarking",
-		"traversing_colonists",
-	}) do
-		local value = FD.ReadField(obj, field)
-
-		if FD.IsColonist(value) then
-			FD.DetachColonist(value)
-		else
-			FD.DetachColonistsFromTable(value)
-		end
-	end
-
-	local labels = FD.ReadField(obj, "labels")
-
-	if type(labels) == "table" then
-		for _, label_list in pairs(labels) do
-			FD.DetachColonistsFromTable(label_list)
-		end
-	end
-
-	FD.DetachColonistsTargetingObject(obj)
-
-	local passage_obj = FD.PassageObjectFor(obj)
-
-	if passage_obj == obj then
-		for _, related in ipairs(FD.CollectPassageRelatedObjects(passage_obj)) do
-			if related ~= obj then
-				FD.DetachContainedColonists(related)
-			end
-		end
-	end
-end
-
 
 -- ============================================================================
--- fd_cleanup_animals.lua
+-- Module loading
 -- ============================================================================
 
-function FD.AddContainedAnimal(animals, seen, obj)
-	if not FD.IsAnimal(obj) or seen[obj] then
-		return
-	end
-
-	seen[obj] = true
-	animals[#animals + 1] = obj
-end
-
-function FD.CollectAnimalsFromTable(list, animals, seen)
-	if type(list) ~= "table" then
-		return
-	end
-
-	for _, obj in ipairs(list) do
-		FD.AddContainedAnimal(animals, seen, obj)
-	end
-
-	for key, value in pairs(list) do
-		FD.AddContainedAnimal(animals, seen, value)
-		FD.AddContainedAnimal(animals, seen, key)
-	end
-end
-
-function FD.RemoveAnimalFromTable(list, animal)
-	FD.RemoveObjectFromTableEntries(list, animal)
-end
-
-function FD.StopAnimalCommand(animal)
-	FD.StopCommandObject(animal)
-end
-
-function FD.DeleteAnimalNow(animal)
-	if not FD.IsAnimal(animal) then
+-- Normalize a mod folder path so module file names can be appended safely.
+function FD.NormalizeModPath(path)
+	if type(path) ~= "string" or path == "" then
 		return false
 	end
 
-	local ok = pcall(function()
-		local dome = FD.ReadField(animal, "dome")
-		local pasture = FD.ReadField(animal, "pasture")
-
-		if FD.IsObjectValid(dome) and type(FD.ReadField(dome, "RemoveFromLabel")) == "function" then
-			pcall(function()
-				dome:RemoveFromLabel("Pet", animal)
-			end)
-		end
-
-		if FD.IsObjectValid(pasture) then
-			FD.RemoveAnimalFromTable(FD.ReadField(pasture, "current_herd"), animal)
-			FD.RemoveAnimalFromTable(FD.ReadField(pasture, "animals"), animal)
-		end
-
-		FD.StopAnimalCommand(animal)
-
-		if type(FD.ReadField(animal, "delete")) == "function" then
-			animal:delete()
-			return
-		end
-
-		FD.SafeCall(FD.Global("DoneObject"), animal)
-	end)
-
-	return ok
-end
-
-function FD.DeleteContainedAnimals(obj)
-	if not FD.IsObjectValid(obj) or FD.IsAnimal(obj) then
-		return
+	local last = path:sub(-1)
+	if last == "/" or last == "\\" then
+		return path
 	end
 
-	local animals, seen = {}, {}
+	return path .. "/"
+end
 
-	for _, field in ipairs({
-		"animal",
-		"animals",
-		"pets",
-		"current_herd",
-		"herd",
-		"spawned_animals",
-		"visitors",
-		"children",
-	}) do
-		local value = FD.ReadField(obj, field)
+-- Build possible mod root paths from the globals commonly available while mod
+-- code is loading. This avoids depending on CurrentModPath alone.
+function FD.ModPathCandidates()
+	local candidates = {}
 
-		if FD.IsAnimal(value) then
-			FD.AddContainedAnimal(animals, seen, value)
-		else
-			FD.CollectAnimalsFromTable(value, animals, seen)
+	local function add(path)
+		path = FD.NormalizeModPath(path)
+		if path then
+			candidates[#candidates + 1] = path
 		end
 	end
 
-	local labels = FD.ReadField(obj, "labels")
+	add(rawget(_G, "CurrentModPath"))
 
-	if type(labels) == "table" then
-		for _, label_name in ipairs({
-			"Pet",
-			"Animal",
-			"Animals",
-			"BaseAnimal",
-			"BasePet",
-			"RoamingPet",
-			"StaticPet",
-			"PastureAnimal",
-		}) do
-			FD.CollectAnimalsFromTable(labels[label_name], animals, seen)
+	local debug_lib = rawget(_G, "debug")
+	if type(debug_lib) == "table" and type(debug_lib.getinfo) == "function" then
+		local info = debug_lib.getinfo(1, "S")
+		local source = info and info.source
+		if type(source) == "string" and source:sub(1, 1) == "@" then
+			local file_path = source:sub(2)
+			add(file_path:gsub("[/\\]Code[/\\]ForceDelete%.lua$", ""))
 		end
 	end
 
-	for _, animal in ipairs(animals) do
-		FD.DeleteAnimalNow(animal)
-	end
-end
-
-
--- ============================================================================
--- fd_cleanup_drones.lua
--- ============================================================================
-
-function FD.ObjectInDeleteSet(obj, delete_set)
-	if not FD.IsObjectValid(obj) then
-		return false
+	local current_mod = rawget(_G, "CurrentModDef")
+	if type(current_mod) == "table" then
+		add(FD.ReadField(current_mod, "path"))
+		add(FD.ReadField(current_mod, "content_path"))
+		add(FD.ReadField(current_mod, "env_path"))
 	end
 
-	if delete_set[obj] then
-		return true
-	end
-
-	local parent = FD.ReadField(obj, "parent")
-
-	if parent and delete_set[parent] then
-		return true
-	end
-
-	local building = FD.ReadField(obj, "building")
-
-	if building and delete_set[building] then
-		return true
-	end
-
-	return false
-end
-
-function FD.RequestSource(req, unit)
-	if not req or type(FD.ReadField(req, "GetSource")) ~= "function" then
-		return false
-	end
-
-	local ok, source = pcall(function()
-		return req:GetSource(unit)
-	end)
-
-	return ok and source or false
-end
-
-function FD.DroneRequestTargetsDeletedObject(drone, req, delete_set)
-	if not req then
-		return false
-	end
-
-	if delete_set[req] then
-		return true
-	end
-
-	local source = FD.RequestSource(req, drone)
-
-	return FD.ObjectInDeleteSet(source, delete_set)
-end
-
-function FD.DroneTargetsDeletedObject(drone, delete_set)
-	if not FD.IsDroneObject(drone) then
-		return false
-	end
-
-	for _, field in ipairs({
-		"target",
-		"goto_target",
-		"fx_moving_target",
-		"rogue_target",
-		"holder",
-		"building",
-		"command_center",
-	}) do
-		if FD.ObjectInDeleteSet(FD.ReadField(drone, field), delete_set) then
-			return true
-		end
-	end
-
-	for _, field in ipairs({
-		"d_request",
-		"s_request",
-		"w_request",
-		"picked_up_from_req",
-	}) do
-		if FD.DroneRequestTargetsDeletedObject(drone, FD.ReadField(drone, field), delete_set) then
-			return true
-		end
-	end
-
-	return false
-end
-
-function FD.DroneHasCarriedResource(drone)
-	local resource = FD.ReadField(drone, "resource")
-	local amount = FD.ReadField(drone, "amount")
-
-	return resource and amount and amount ~= 0
-end
-
-function FD.DroneIsActiveDelivery(drone)
-	local command = FD.ReadField(drone, "command")
-
-	return command == "Deliver"
-		or command == "PickUp"
-		or command == "Work"
-		or FD.DroneHasCarriedResource(drone)
-end
-
-function FD.DroneShouldResetForDelete(drone, delete_set, affected_cities)
-	if FD.DroneTargetsDeletedObject(drone, delete_set) then
-		return true
-	end
-
-	-- Be deliberately conservative for hard-delete. A drone that is already in
-	-- a delivery/pickup/work command can later run its command destructor and
-	-- call Building:DroneUnloadResource on an object whose stockpile/map state
-	-- has just been invalidated by dome deletion. Earlier versions limited this
-	-- to drones whose city matched the delete batch, but some drones have nil or
-	-- mismatched city references during teardown. Reset all active delivery
-	-- drones visible through the scanned city/colony labels.
-	return FD.DroneIsActiveDelivery(drone)
-end
-
-function FD.ResetDroneForDeletedTarget(drone)
-	if not FD.IsDroneObject(drone) then
-		return
-	end
-
-	for _, field in ipairs({
-		"d_request",
-		"s_request",
-		"w_request",
-		"picked_up_from_req",
-		"request",
-		"resource_request",
-	}) do
-		FD.MarkForceDeleteDetachedField(drone, field)
-	end
-
-	-- Do not call SetCommand("Reset") here. Reset and normal command-thread
-	-- deletion can run command destructors later, and those destructors may call
-	-- DroneUnloadResource on a stockpile/building whose map state was just
-	-- invalidated by hard-delete. Hard-delete needs an immediate raw detach.
-	for _, method_name in ipairs({
-		"DroneLoadResource",
-		"DroneUnloadResource",
-		"DroneWork",
-		"UnloadResource",
-		"LoadResource",
-	}) do
-		FD.WriteField(drone, method_name, FD.ForceDeleteNoOp)
-	end
-
-	FD.WriteField(drone, "command_destructors", false)
-	FD.WriteField(drone, "command_queue", nil)
-	FD.WriteField(drone, "forced_cmd_importance", nil)
-
-	for _, field in ipairs({
-		"target",
-		"goto_target",
-		"fx_moving_target",
-		"rogue_target",
-		"holder",
-		"building",
-		"command_center",
-		"d_request",
-		"s_request",
-		"w_request",
-		"picked_up_from_req",
-		"request",
-		"resource_request",
-		"destination",
-		"resource",
-	}) do
-		FD.WriteField(drone, field, false)
-	end
-
-	FD.WriteField(drone, "amount", 0)
-	FD.WriteField(drone, "command", false)
-
-	if type(FD.ReadField(drone, "DestroyAttaches")) == "function" then
-		pcall(function()
-			drone:DestroyAttaches("ResourceStockpileBox")
-		end)
-	end
-
-	FD.StopCommandObjectNoDestructors(drone)
-end
-
-function FD.ResetDronesFromTable(list, delete_set, affected_cities, seen)
-	if type(list) ~= "table" then
-		return
-	end
-
-	local scanned = 0
-
-	for _, drone in ipairs(list) do
-		scanned = scanned + 1
-
-		if scanned > FD.MAX_CONTAINED_LABEL_SCAN then
-			return
-		end
-
-		if FD.IsDroneObject(drone) and not seen[drone] then
-			seen[drone] = true
-
-			if FD.DroneShouldResetForDelete(drone, delete_set, affected_cities) then
-				FD.ResetDroneForDeletedTarget(drone)
+	local mods_loaded = rawget(_G, "ModsLoaded")
+	if type(mods_loaded) == "table" then
+		for _, mod in ipairs(mods_loaded) do
+			if FD.ReadField(mod, "id") == "ForceDelete" then
+				add(FD.ReadField(mod, "path"))
+				add(FD.ReadField(mod, "content_path"))
+				add(FD.ReadField(mod, "env_path"))
 			end
 		end
 	end
 
-	for key, drone in pairs(list) do
-		scanned = scanned + 1
-
-		if scanned > FD.MAX_CONTAINED_LABEL_SCAN then
-			return
-		end
-
-		for _, candidate in ipairs({ key, drone }) do
-			if FD.IsDroneObject(candidate) and not seen[candidate] then
-				seen[candidate] = true
-
-				if FD.DroneShouldResetForDelete(candidate, delete_set, affected_cities) then
-					FD.ResetDroneForDeletedTarget(candidate)
-				end
-			end
-		end
-	end
+	return candidates
 end
 
-function FD.ResetDronesTargetingDeletedObjects(objects_to_delete, delete_set)
-	local seen = {}
-	local affected_cities = {}
-	local containers = {}
-	local seen_containers = {}
-
-	local function add_container(container)
-		if container and not seen_containers[container] then
-			seen_containers[container] = true
-			containers[#containers + 1] = container
-		end
-	end
-
-	for _, obj in ipairs(objects_to_delete) do
-		local city = FD.ReadField(obj, "city")
-
-		if city then
-			affected_cities[city] = true
-			add_container(city)
-		end
-
-		FD.ResetDronesFromTable(FD.ReadField(obj, "drones"), delete_set, affected_cities, seen)
-
-		local labels = FD.ReadField(obj, "labels")
-
-		if type(labels) == "table" then
-			FD.ResetDronesFromTable(labels.Drone, delete_set, affected_cities, seen)
-		end
-	end
-
-	for _, container in ipairs({
-		FD.Global("UICity"),
-		FD.Global("MainCity"),
-		FD.Global("SelectedCity"),
-		FD.Global("UIColony"),
-	}) do
-		add_container(container)
-	end
-
-	for _, container in ipairs(containers) do
-		local labels = FD.ReadField(container, "labels")
-
-		if type(labels) == "table" then
-			FD.ResetDronesFromTable(labels.Drone, delete_set, affected_cities, seen)
-		end
-	end
-end
-
-
--- ============================================================================
--- fd_cleanup_stockpiles.lua
--- ============================================================================
-
-function FD.StockpileStoredAmount(stockpile)
-	if not FD.IsObjectValid(stockpile) then
-		return 0
-	end
-
-	local get_stored_amount = FD.ReadField(stockpile, "GetStoredAmount")
-
-	if type(get_stored_amount) == "function" then
-		local ok, amount = pcall(function()
-			return get_stored_amount(stockpile)
-		end)
-
-		if ok and type(amount) == "number" then
-			return amount
-		end
-	end
-
-	local amount = FD.ReadField(stockpile, "stockpiled_amount")
-
-	return type(amount) == "number" and amount or 0
-end
-
-function FD.PauseResourceProducer(obj)
-	if not FD.IsObjectValid(obj) then
-		return
-	end
-
-	if FD.IsKindOf(obj, "ResourceProducer") or FD.ReadField(obj, "producers") then
-		FD.WriteField(obj, "working", false)
-		FD.WriteField(obj, "last_production_start_ts", false)
-	end
-end
-
-function FD.PruneStockpileController(controller, delete_set)
-	if not FD.IsStockpileControllerObject(controller) then
-		return
-	end
-
-	local stockpiles = FD.ReadField(controller, "stockpiles")
-	local total_stockpiled = 0
-	local kept = 0
-
-	for i = #stockpiles, 1, -1 do
-		local stockpile = stockpiles[i]
-
-		if delete_set[stockpile] or not FD.IsObjectValid(stockpile) then
-			if FD.IsResourceStockpileObject(stockpile) then
-				FD.WriteField(stockpile, "parent", false)
-				FD.WriteField(stockpile, "destroy_when_empty", true)
-			end
-
-			table.remove(stockpiles, i)
-		else
-			kept = kept + 1
-			total_stockpiled = total_stockpiled + FD.StockpileStoredAmount(stockpile)
-		end
-	end
-
-	for key, stockpile in pairs(stockpiles) do
-		if delete_set[key] or delete_set[stockpile] or not FD.IsObjectValid(stockpile) then
-			stockpiles[key] = nil
-		end
-	end
-
-	if kept <= 0 then
-		FD.WriteField(controller, "stockpiles", {})
-		FD.WriteField(controller, "total_stockpiled", 0)
-		FD.WriteField(controller, "next_stockpile_idx", 1)
-		FD.WriteField(controller, "current_stockpile_idx_stockpiled_amount", 0)
-		return
-	end
-
-	local next_stockpile_idx = FD.ReadField(controller, "next_stockpile_idx")
-
-	if type(next_stockpile_idx) ~= "number" or next_stockpile_idx < 1 or next_stockpile_idx > kept then
-		FD.WriteField(controller, "next_stockpile_idx", 1)
-	end
-
-	FD.WriteField(controller, "total_stockpiled", total_stockpiled)
-	FD.WriteField(controller, "current_stockpile_idx_stockpiled_amount", 0)
-end
-
-function FD.ForEachProducerController(obj, callback)
-	local visited = {}
-
-	local function visit(controller)
-		if FD.IsObjectValid(controller) and not visited[controller] then
-			visited[controller] = true
-			callback(controller)
-		end
-	end
-
-	visit(obj)
-	visit(FD.ReadField(obj, "wasterock_producer"))
-
-	local producers = FD.ReadField(obj, "producers")
-
-	if type(producers) == "table" then
-		for _, producer in ipairs(producers) do
-			visit(producer)
-		end
-
-		for _, producer in pairs(producers) do
-			visit(producer)
-		end
-	end
-end
-
-function FD.ForceDeleteNoOp()
-	return false
-end
-
-
--- Mark objects whose pending drone/resource callbacks must no-op.  Some drone
--- command destructors can fire long after hard-delete and call back into
--- Building/HasConsumption/ResourceStockpile methods.  The guard below prevents
--- those delayed callbacks from touching objects whose map state is already
--- detached or invalid.
-function FD.IsTaskRequestObject(obj)
-	if not obj then
-		return false
-	end
-
-	-- Task/request userdata can be read but should not receive arbitrary
-	-- fields. Writing a temporary flag to these objects triggers the engine
-	-- assert "Indexing a task request". Requests are detached by clearing the
-	-- owning drone/building fields instead of marking the request itself.
-	return type(FD.ReadField(obj, "GetSource")) == "function"
-		and type(FD.ReadField(obj, "GetMap")) ~= "function"
-		and not FD.ReadField(obj, "class")
-end
-
-function FD.CanAttachForceDeleteFlag(obj)
-	if not obj or FD.IsTaskRequestObject(obj) then
-		return false
-	end
-
-	if type(obj) == "table" then
-		return true
-	end
-
-	if not FD.IsObjectValid(obj) then
-		return false
-	end
-
-	return FD.ReadField(obj, "class") ~= nil
-		or type(FD.ReadField(obj, "GetMap")) == "function"
-		or type(FD.ReadField(obj, "GetPos")) == "function"
-		or type(FD.ReadField(obj, "delete")) == "function"
-		or type(FD.ReadField(obj, "Destroy")) == "function"
-end
-
-function FD.MarkForceDeleteDetached(obj)
-	if not FD.CanAttachForceDeleteFlag(obj) then
-		return
-	end
-
-	FD.WriteField(obj, "force_delete_detached", true)
-	FD.WriteField(obj, "force_delete_pending", true)
-end
-
-function FD.MarkForceDeleteDetachedField(obj, field)
-	FD.MarkForceDeleteDetached(FD.ReadField(obj, field))
-end
-
-function FD.ObjectHasInvalidMap(obj)
-	if not obj then
-		return true
-	end
-
-	local get_map = FD.ReadField(obj, "GetMap")
-
-	if type(get_map) ~= "function" then
-		return false
-	end
-
-	local ok, map = pcall(function()
-		return get_map(obj)
-	end)
-
-	return not ok or not map
-end
-
-function FD.IsForceDeleteDetachedObject(obj)
-	if not obj then
-		return true
-	end
-
-	if FD.ReadField(obj, "force_delete_detached") or FD.ReadField(obj, "force_delete_pending") then
-		return true
-	end
-
-	local parent = FD.ReadField(obj, "parent")
-
-	if parent and parent ~= obj then
-		if FD.ReadField(parent, "force_delete_detached") or FD.ReadField(parent, "force_delete_pending") then
-			return true
-		end
-	end
-
-	return FD.ObjectHasInvalidMap(obj)
-end
-
-function FD.ShouldBlockDroneResourceCallback(self, ...)
-	if FD.IsForceDeleteDetachedObject(self) then
-		return true
-	end
-
-	local args = { ... }
-
-	for _, value in ipairs(args) do
-		if type(value) == "table" and FD.IsForceDeleteDetachedObject(value) then
-			return true
-		end
-	end
-
-	return false
-end
-
-function FD.PatchClassMethodGuard(class_name, method_name)
-	FD.patched_method_guards = FD.patched_method_guards or {}
-
-	local key = class_name .. "." .. method_name
-
-	if FD.patched_method_guards[key] then
-		return
-	end
-
-	local class_table = FD.Global(class_name)
-
-	if type(class_table) ~= "table" then
-		return
-	end
-
-	local original = FD.ReadField(class_table, method_name)
-
-	if type(original) ~= "function" then
-		return
-	end
-
-	local ok = FD.WriteField(class_table, method_name, function(self, ...)
-		if FD.ShouldBlockDroneResourceCallback(self, ...) then
-			return false
-		end
-
-		return original(self, ...)
-	end)
-
-	if ok then
-		FD.patched_method_guards[key] = original
-	end
-end
-
-function FD.PatchDroneResourceMethodGuards()
-	local guarded_methods = {
-		ResourceStockpile = {
-			"UpdateVisualStockpile",
-			"DroneLoadResource",
-			"DroneUnloadResource",
-			"SetCount",
-			"SetCountInternal",
-			"SetCountFromRequest",
-		},
-		ResourceStockpileBase = {
-			"UpdateVisualStockpile",
-			"DroneLoadResource",
-			"DroneUnloadResource",
-			"SetCount",
-			"SetCountInternal",
-			"SetCountFromRequest",
-		},
-		HasConsumption = {
-			"ConsumptionDroneUnload",
-			"MaintenanceDroneUnload",
-			"DroneLoadResource",
-			"DroneUnloadResource",
-			"UpdateVisualStockpile",
-			"UpdateConsumption",
-			"UpdateRequestConnectivity",
-		},
-		Building = {
-			"DroneLoadResource",
-			"DroneUnloadResource",
-			"UpdateVisualStockpile",
-			"UpdateConsumption",
-			"UpdateRequestConnectivity",
-		},
-	}
-
-	for class_name, methods in pairs(guarded_methods) do
-		for _, method_name in ipairs(methods) do
-			FD.PatchClassMethodGuard(class_name, method_name)
-		end
-	end
-end
-
-function FD.NeutralizeStockpileCallbacks(stockpile)
-	if not FD.IsObjectValid(stockpile) then
-		return
-	end
-
-	FD.MarkForceDeleteDetached(stockpile)
-
-	for _, method_name in ipairs({
-		"SetCount",
-		"SetCountInternal",
-		"SetCountFromRequest",
-		"DroneLoadResource",
-		"DroneUnloadResource",
-		"UpdateVisualStockpile",
-	}) do
-		FD.WriteField(stockpile, method_name, FD.ForceDeleteNoOp)
-	end
-
-	FD.WriteField(stockpile, "parent", false)
-	FD.WriteField(stockpile, "destroy_when_empty", true)
-end
-
-function FD.NeutralizeStockpileTableCallbacks(stockpiles)
-	if type(stockpiles) ~= "table" then
-		return
-	end
-
-	local scanned = 0
-
-	for _, stockpile in ipairs(stockpiles) do
-		scanned = scanned + 1
-
-		if scanned > FD.MAX_CONTAINED_LABEL_SCAN then
-			return
-		end
-
-		FD.NeutralizeStockpileCallbacks(stockpile)
-	end
-
-	for key, stockpile in pairs(stockpiles) do
-		scanned = scanned + 1
-
-		if scanned > FD.MAX_CONTAINED_LABEL_SCAN then
-			return
-		end
-
-		FD.NeutralizeStockpileCallbacks(key)
-		FD.NeutralizeStockpileCallbacks(stockpile)
-	end
-end
-
-function FD.NeutralizeDroneResourceCallbacks(obj)
-	if not FD.IsObjectValid(obj) then
-		return
-	end
-
-	FD.MarkForceDeleteDetached(obj)
-
-	for _, field in ipairs({
-		"consumption_resource_stockpile",
-		"consumption_resource_request",
-		"maintenance_resource_request",
-		"d_request",
-		"s_request",
-		"w_request",
-		"picked_up_from_req",
-	}) do
-		FD.MarkForceDeleteDetachedField(obj, field)
-	end
-
-	for _, method_name in ipairs({
-		"DroneLoadResource",
-		"DroneUnloadResource",
-		"DroneWork",
-		"ConsumptionDroneUnload",
-		"MaintenanceDroneUnload",
-		"UpdateVisualStockpile",
-		"UpdateRequestConnectivity",
-		"UpdateConsumption",
-		"RunProduction",
-		"Produce",
-		"DoesHaveConsumption",
-		"DoesRequireMaintenance",
-		"IsOwnRequest",
-	}) do
-		FD.WriteField(obj, method_name, FD.ForceDeleteNoOp)
-	end
-
-	FD.NeutralizeStockpileCallbacks(FD.ReadField(obj, "consumption_resource_stockpile"))
-	FD.NeutralizeStockpileTableCallbacks(FD.ReadField(obj, "stockpiles"))
-	FD.WriteField(obj, "consumption_resource_stockpile", false)
-	FD.WriteField(obj, "consumption_resource_request", false)
-	FD.WriteField(obj, "maintenance_resource_request", false)
-end
-
-function FD.NeutralizeDroneResourceCallbacksForDelete(objects_to_delete)
-	for _, obj in ipairs(objects_to_delete) do
-		if FD.IsObjectValid(obj) then
-			FD.NeutralizeDroneResourceCallbacks(obj)
-
-			FD.ForEachProducerController(obj, function(controller)
-				FD.NeutralizeDroneResourceCallbacks(controller)
-			end)
-		end
-	end
-end
-
-function FD.CleanupStockpileReferences(objects_to_delete, delete_set)
-	for _, obj in ipairs(objects_to_delete) do
-		if FD.IsObjectValid(obj) then
-			FD.PauseResourceProducer(obj)
-
-			FD.ForEachProducerController(obj, function(controller)
-				FD.PruneStockpileController(controller, delete_set)
-				FD.WriteField(controller, "last_production_start_ts", false)
-			end)
-
-			local parent = FD.ReadField(obj, "parent")
-
-			if parent then
-				FD.PruneStockpileController(parent, delete_set)
-			end
-
-			if FD.IsResourceStockpileObject(obj) then
-				FD.WriteField(obj, "parent", false)
-			end
-		end
-	end
-end
-
--- Detect whether an object is a visible or marker-backed resource deposit.
-
-
--- ============================================================================
--- fd_cleanup_deposits.lua
--- ============================================================================
-
-function FD.UnregisterDepositObject(obj)
-	if not FD.IsObjectValid(obj) then
-		return
-	end
-
-	local marker = false
-
-	if FD.IsMarker(obj) then
-		marker = obj
-	else
-		marker = FD.FindMarker(obj)
-	end
-
-	if not FD.IsObjectValid(marker) then
-		return
-	end
-
-	local city = FD.SafeCall(FD.Global("GetCity"), marker) or FD.Global("UICity")
-	local sector = false
-
-	if city then
-		sector = FD.SafeCall(FD.Global("GetMapSector"), city, marker)
-	end
-
-	if sector and type(FD.ReadField(sector, "UnregisterDeposit")) == "function" then
-		pcall(function()
-			sector:UnregisterDeposit(marker)
-		end)
-	end
-
-	local markers = sector and FD.ReadField(sector, "markers")
-
-	if type(markers) == "table" then
-		FD.RemoveObjectFromTable(markers.surface, marker)
-		FD.RemoveObjectFromTable(markers.subsurface, marker)
-		FD.RemoveObjectFromTable(markers.deep, marker)
-		FD.RemoveObjectFromTable(markers.block, marker)
-	end
-
-	if sector then
-		FD.RemoveObjectFromTable(FD.ReadField(sector, "revealed_surf"), marker)
-		FD.RemoveObjectFromTable(FD.ReadField(sector, "revealed_deep"), marker)
-	end
-
-	FD.PruneObjectFromGlobalLabels(marker)
-end
-
-
--- ============================================================================
--- fd_cleanup_domes.lua
--- ============================================================================
-
-function FD.DisableObjectLights(obj)
-	if not FD.IsObjectValid(obj) then
-		return
-	end
-
-	if type(FD.ReadField(obj, "SetIsNightLightPossible")) == "function" then
-		pcall(function()
-			obj:SetIsNightLightPossible(false, true)
-		end)
-
-		pcall(function()
-			obj:SetIsNightLightPossible(false)
-		end)
-	end
-
-	if type(FD.ReadField(obj, "NightLightDisable")) == "function" then
-		pcall(function()
-			obj:NightLightDisable()
-		end)
-	end
-
-	if type(FD.ReadField(obj, "WorkLightsOff")) == "function" then
-		pcall(function()
-			obj:WorkLightsOff()
-		end)
-	elseif type(FD.ReadField(obj, "SetSIModulation")) == "function" then
-		pcall(function()
-			obj:SetSIModulation(0)
-		end)
-	end
-end
-
-function FD.ClearLightFlags(obj)
-	if type(FD.ReadField(obj, "ClearLightFlags")) ~= "function" then
-		return
-	end
-
-	local game_const = FD.Global("const")
-
-	if not game_const then
-		return
-	end
-
-	for _, flag_name in ipairs({
-		"elfInterior",
-		"elfExterior",
-		"elfInteriorAndExteriorWhenHasShadowmap",
-		"elfCastShadows",
-		"elfTerrainShadows",
-		"elfDetailedShadows",
-	}) do
-		local flag = game_const[flag_name]
-
-		if flag then
-			pcall(function()
-				obj:ClearLightFlags(flag)
-			end)
-		end
-	end
-end
-
-function FD.NeutralizeClusterLight(obj)
-	if not FD.IsObjectValid(obj) then
-		return
-	end
-
-	FD.DisableObjectLights(obj)
-
-	local game_const = FD.Global("const")
-
-	if game_const and game_const.efVisible and type(FD.ReadField(obj, "ClearEnumFlags")) == "function" then
-		pcall(function()
-			obj:ClearEnumFlags(game_const.efVisible)
-		end)
-	end
-
-	FD.ClearLightFlags(obj)
-
-	for _, method_name in ipairs({
-		"SetIntensity",
-		"SetIntensity0",
-		"SetIntensity1",
-		"SetConstantIntensity",
-	}) do
-		local method = FD.ReadField(obj, method_name)
-
-		if type(method) == "function" then
-			pcall(function()
-				method(obj, 0)
-			end)
-		end
-	end
-
-	for _, method_name in ipairs({
-		"SetVolumeId",
-		"SetTargetVolumeId",
-	}) do
-		local method = FD.ReadField(obj, method_name)
-
-		if type(method) == "function" then
-			pcall(function()
-				method(obj, 0)
-			end)
-		end
-	end
-
-	if game_const and game_const.eLightTypePoint and type(FD.ReadField(obj, "SetLightType")) == "function" then
-		pcall(function()
-			obj:SetLightType(game_const.eLightTypePoint)
-		end)
-	end
-
-	if type(FD.ReadField(obj, "DestroyRenderObj")) == "function" then
-		pcall(function()
-			obj:DestroyRenderObj(true)
-		end)
-
-		pcall(function()
-			obj:DestroyRenderObj()
-		end)
-	end
-end
-
-function FD.DestroyLightObject(obj)
-	if not FD.IsObjectValid(obj) then
-		return false
-	end
-
-	FD.NeutralizeClusterLight(obj)
-
-	if type(FD.ReadField(obj, "Destroy")) == "function" then
-		local ok = pcall(function()
-			obj:Destroy()
-		end)
-
+-- Load a support module by trying every known mod path. The function is safe to
+-- retry because each support file has its own double-load guard.
+function FD.LoadSupportModule(file_name)
+	for _, path in ipairs(FD.ModPathCandidates()) do
+		local ok = pcall(dofile, path .. "Code/" .. file_name)
 		if ok then
 			return true
 		end
 	end
 
-	local ok = pcall(function()
-		if type(FD.ReadField(obj, "delete")) == "function" then
-			obj:delete()
-			return
-		end
-
-		FD.SafeCall(FD.Global("DoneObject"), obj)
-	end)
-
-	return ok
-end
-
-function FD.NeedsRenderObjectsRebuild(objects_to_delete)
-	for _, obj in ipairs(objects_to_delete) do
-		if FD.IsDome(obj) or FD.IsComponentLightObject(obj) then
-			return true
-		end
-	end
-
 	return false
 end
 
-function FD.AddDomeLight(lights, seen, obj)
-	if FD.IsComponentLightObject(obj) and not seen[obj] then
-		seen[obj] = true
-		lights[#lights + 1] = obj
+-- Load support modules in deterministic order. This can be retried from OnMsg
+-- hooks in case the mod path globals appear later than the main script.
+function FD.LoadSupportModules()
+	FD.LoadSupportModule("fd_config.lua")
+	FD.LoadSupportModule("fd_display_attributes.lua")
+	FD.LoadSupportModule("fd_colonist.lua")
+
+	if FD.DisplayAttributes and FD.DisplayAttributes.ShowInitialMessage then
+		FD.DisplayAttributes.ShowInitialMessage()
 	end
 end
 
-function FD.CollectDomeLights(dome)
-	local lights = {}
-	local seen = {}
-
-	FD.AddDomeLight(lights, seen, FD.ReadField(dome, "cupola_interior_marker"))
-
-	if type(FD.ReadField(dome, "ForEachAttach")) == "function" then
-		pcall(function()
-			dome:ForEachAttach("ComponentLight", function(attach)
-				FD.AddDomeLight(lights, seen, attach)
-			end)
-		end)
-
-		pcall(function()
-			dome:ForEachAttach(function(attach)
-				FD.AddDomeLight(lights, seen, attach)
-			end)
-		end)
-	end
-
-	return lights
-end
-
-function FD.DisableObjectsLightsFromTable(list, seen)
-	if type(list) ~= "table" then
-		return
-	end
-
-	local scanned = 0
-
-	for _, obj in ipairs(list) do
-		scanned = scanned + 1
-
-		if scanned > FD.MAX_CONTAINED_LABEL_SCAN then
-			return
-		end
-
-		if FD.IsObjectValid(obj) and not seen[obj] then
-			seen[obj] = true
-			FD.DisableObjectLights(obj)
-		end
-	end
-
-	for key, value in pairs(list) do
-		if scanned > FD.MAX_CONTAINED_LABEL_SCAN then
-			return
-		end
-
-		local obj = false
-
-		if FD.IsObjectValid(value) then
-			obj = value
-		elseif FD.IsObjectValid(key) then
-			obj = key
-		end
-
-		if obj and not seen[obj] then
-			scanned = scanned + 1
-			seen[obj] = true
-			FD.DisableObjectLights(obj)
-		end
-	end
-end
-
-function FD.DisableDomeLights(dome)
-	if not FD.IsDome(dome) then
-		return
-	end
-
-	local seen = {}
-
-	seen[dome] = true
-	FD.DisableObjectLights(dome)
-
-	local labels = FD.ReadField(dome, "labels")
-
-	if type(labels) == "table" then
-		for _, label_list in pairs(labels) do
-			FD.DisableObjectsLightsFromTable(label_list, seen)
-		end
-	end
-
-	for _, light in ipairs(FD.CollectDomeLights(dome)) do
-		FD.DestroyLightObject(light)
-	end
-
-	FD.WriteField(dome, "cupola_interior_marker", false)
-end
-
--- Remove one valid object without invoking recursive delete logic.
-
-function FD.ForceDeleteObject(obj)
-	if not FD.IsObjectValid(obj) then
-		return false
-	end
-
-	FD.MarkForceDeleteDetached(obj)
-	FD.DisableObjectLights(obj)
-
-	local ok = pcall(function()
-		if type(FD.ReadField(obj, "delete")) == "function" then
-			obj:delete()
-			return
-		end
-
-		FD.SafeCall(FD.Global("DoneObject"), obj)
-	end)
-
-	return ok
-end
-
--- Remove an object only after the game demolition pipeline has already been
--- force-started.  This is intentionally separate from DeleteObject(), because
--- DeleteObject() routes live domes back through staged demolition to avoid
--- corrupting the supply grid.
-function FD.PruneObjectFromKnownContainers(obj)
-	if not FD.IsObjectValid(obj) then
-		return
-	end
-
-	local containers = {
-		FD.ReadField(obj, "city"),
-		FD.ReadField(obj, "dome"),
-		FD.ReadField(obj, "parent"),
-		FD.ReadField(obj, "parent_dome"),
-		FD.Global("UICity"),
-		FD.Global("MainCity"),
-		FD.Global("SelectedCity"),
-		FD.Global("UIColony"),
-	}
-	local seen = {}
-
-	for _, container in ipairs(containers) do
-		if container and container ~= obj and not seen[container] then
-			seen[container] = true
-			FD.PruneObjectFromContainerLabels(container, obj)
-		end
-	end
-
-	FD.PruneObjectFromGlobalLabels(obj)
-end
-
-function FD.HardRemoveAfterStagedDemolition(obj)
-	if not FD.IsObjectValid(obj) then
-		return false
-	end
-
-	local passage_obj = FD.PassageObjectFor(obj)
-
-	if passage_obj and passage_obj ~= obj then
-		obj = passage_obj
-	end
-
-	FD.MarkForceDeleteDetached(obj)
-	FD.PruneObjectFromKnownContainers(obj)
-
-	if FD.IsResourceDepositObject(obj) or FD.IsMarker(obj) then
-		FD.UnregisterDepositObject(obj)
-	end
-
-	if FD.IsPassageObject(obj) then
-		FD.PreparePassageForDelete(obj)
-	end
-
-	if FD.IsDome(obj) then
-		FD.DisableDomeLights(obj)
-		FD.ClearDomeVisuals(obj)
-		FD.ResetDomeTerrain(obj)
-	else
-		FD.DisableObjectLights(obj)
-	end
-
-	return FD.ForceDeleteObject(obj)
-end
-
--- Remove dome floor, grass, decals, and road visual attachments only.
-
-function FD.ClearDomeVisuals(dome)
-	if not FD.IsDome(dome) then
-		return
-	end
-
-	local attach_classes = {
-		"BakedDomeDecal",
-		"BakedDomeDecalLarge",
-		"DomeTerrain",
-		"DomeGrass",
-		"DomeRoadConnection",
-	}
-
-	if type(FD.ReadField(dome, "DestroyAttaches")) == "function" then
-		for _, class_name in ipairs(attach_classes) do
-			pcall(function()
-				dome:DestroyAttaches(class_name)
-			end)
-		end
-	end
-
-	local to_delete = {}
-
-	if type(FD.ReadField(dome, "ForEachAttach")) == "function" then
-		for _, class_name in ipairs(attach_classes) do
-			pcall(function()
-				dome:ForEachAttach(class_name, function(attach)
-					if FD.IsObjectValid(attach) then
-						to_delete[#to_delete + 1] = attach
-					end
-				end)
-			end)
-		end
-
-		pcall(function()
-			dome:ForEachAttach(function(attach)
-				if FD.IsDomeVisualAttach(attach) then
-					to_delete[#to_delete + 1] = attach
-				end
-			end)
-		end)
-	end
-
-	for _, attach in ipairs(to_delete) do
-		FD.ForceDeleteObject(attach)
-	end
-end
-
--- Return the best available map object for terrain edits.
-
-function FD.CurrentTerrainMap()
-	return FD.Global("CurrentMap") or FD.Global("MainMap")
-end
-
--- Return an approximate object radius for terrain cleanup.
-
-function FD.ObjectRadius(obj, fallback)
-	if not FD.IsObjectValid(obj) then
-		return fallback or 0
-	end
-
-	local radius = FD.CallMethod(obj, "GetRadius")
-
-	if type(radius) == "number" and radius > 0 then
-		return radius
-	end
-
-	local bbox = FD.CallMethod(obj, "GetEntityBBox")
-
-	if bbox then
-		local ok, size_x, size_y = pcall(function()
-			return bbox:sizex(), bbox:sizey()
-		end)
-
-		if ok and type(size_x) == "number" and type(size_y) == "number" then
-			return math.max(size_x, size_y) / 2
-		end
-	end
-
-	return fallback or 0
-end
-
--- Return the terrain type at a world position.
-
-function FD.TerrainTypeAt(map, pos, visual)
-	local terrain_api = FD.Global("terrain")
-
-	if not terrain_api or type(terrain_api.GetTerrainType) ~= "function" then
-		return false
-	end
-
-	local ok, terrain_type = pcall(function()
-		return terrain_api.GetTerrainType(map, pos, visual)
-	end)
-
-	if ok and terrain_type ~= nil then
-		return terrain_type
-	end
-
-	return false
-end
-
--- Sample nearby terrain outside the dome footprint.
-
-function FD.SampleOuterTerrainType(dome)
-	local map = FD.CurrentTerrainMap()
-
-	if not map or not FD.IsObjectValid(dome) or type(FD.Global("point")) ~= "function" then
-		return false
-	end
-
-	local pos = FD.CallMethod(dome, "GetPos") or FD.ReadField(dome, "pos")
-
-	if not pos then
-		return false
-	end
-
-	local hex_size = FD.HexSize()
-	local radius = FD.ObjectRadius(dome, hex_size * 10)
-	local sample_radius = radius + hex_size * 3
-	local point_fn = FD.Global("point")
-
-	local offsets = {
-		point_fn(sample_radius, 0, 0),
-		point_fn(-sample_radius, 0, 0),
-		point_fn(0, sample_radius, 0),
-		point_fn(0, -sample_radius, 0),
-		point_fn(sample_radius, sample_radius, 0),
-		point_fn(-sample_radius, sample_radius, 0),
-		point_fn(sample_radius, -sample_radius, 0),
-		point_fn(-sample_radius, -sample_radius, 0),
-	}
-
-	local counts = {}
-
-	for _, offset in ipairs(offsets) do
-		local ok, sample_pos = pcall(function()
-			return pos + offset
-		end)
-
-		if ok and sample_pos then
-			local terrain_type = FD.TerrainTypeAt(map, sample_pos, true)
-
-			if terrain_type then
-				counts[terrain_type] = (counts[terrain_type] or 0) + 1
-			end
-		end
-	end
-
-	local best_type = false
-	local best_count = 0
-
-	for terrain_type, count in pairs(counts) do
-		if count > best_count then
-			best_type = terrain_type
-			best_count = count
-		end
-	end
-
-	return best_type
-end
-
--- Repaint the dome footprint with surrounding terrain.
-
-function FD.ResetDomeTerrain(dome)
-	if not FD.IsDome(dome) then
-		return
-	end
-
-	local terrain_api = FD.Global("terrain")
-	local map = FD.CurrentTerrainMap()
-
-	if not terrain_api or not map or type(terrain_api.SetTypeCircle) ~= "function" then
-		return
-	end
-
-	local pos = FD.CallMethod(dome, "GetPos") or FD.ReadField(dome, "pos")
-
-	if not pos then
-		return
-	end
-
-	local hex_size = FD.HexSize()
-	local radius = FD.ObjectRadius(dome, hex_size * 10)
-	local cleanup_radius = radius + hex_size * 2
-	local terrain_type = FD.SampleOuterTerrainType(dome)
-
-	if not terrain_type then
-		return
-	end
-
-	pcall(function()
-		terrain_api.SetTypeCircle(map, pos, cleanup_radius, terrain_type, terrain_type)
-	end)
-
-	if type(terrain_api.InvalidateType) == "function" then
-		pcall(function()
-			terrain_api.InvalidateType(map)
-		end)
-	end
-end
-
+FD.LoadSupportModules()
 
 -- ============================================================================
--- fd_delete.lua
+-- Selection monitoring and dispatch
 -- ============================================================================
 
-function FD.StopCommandObject(obj)
-	if not FD.IsObjectValid(obj) then
+-- Dispatch the selected object to the first module that supports it. The main
+-- script stays generic so future fd_drone/fd_dome modules can plug in cleanly.
+function FD.DispatchSelectedObject(obj)
+	if not FD.DisplayAttributes then
 		return
 	end
 
-	local command_thread = FD.ReadField(obj, "command_thread")
-	local destructor_thread = FD.ReadField(obj, "thread_running_destructors")
-
-	obj.command_destructors = false
-	obj.command_queue = nil
-	obj.forced_cmd_importance = nil
-
-	for _, thread in ipairs({ command_thread, destructor_thread }) do
-		if FD.SafeCall(FD.Global("IsValidThread"), thread) then
-			FD.SafeCall(FD.Global("DeleteThread"), thread, true)
-		end
-	end
-
-	obj.command_thread = nil
-	obj.thread_running_destructors = nil
-	obj.command = false
-end
-
--- Stop command threads without asking the engine to run command destructors.
--- This is used for drones during hard-delete, because drone command
--- destructors may call DroneUnloadResource after a dome/building/stockpile has
--- already been forcibly detached.
-function FD.StopCommandObjectNoDestructors(obj)
-	if not FD.IsObjectValid(obj) then
+	if FD.Config and FD.Config.ShouldDisplayAttributes and not FD.Config.ShouldDisplayAttributes() then
+		FD.DisplayAttributes.Hide()
 		return
 	end
 
-	local command_thread = FD.ReadField(obj, "command_thread")
-	local destructor_thread = FD.ReadField(obj, "thread_running_destructors")
-
-	FD.WriteField(obj, "command_destructors", false)
-	FD.WriteField(obj, "command_queue", nil)
-	FD.WriteField(obj, "forced_cmd_importance", nil)
-
-	for _, thread in ipairs({ command_thread, destructor_thread }) do
-		if FD.SafeCall(FD.Global("IsValidThread"), thread) then
-			FD.SafeCall(FD.Global("DeleteThread"), thread)
-		end
-	end
-
-	FD.WriteField(obj, "command_thread", nil)
-	FD.WriteField(obj, "thread_running_destructors", nil)
-	FD.WriteField(obj, "command", false)
-end
-
-FD.DeleteObject = function(obj)
 	if not FD.IsObjectValid(obj) then
-		return false
-	end
-
-	-- Never directly delete a live dome. Dome teardown is tightly coupled to the
-	-- supply grid and must be owned by the game's demolition code.
-	if FD.IsDome(obj) then
-		return FD.StagedDemolishObject(obj)
-	end
-
-	local passage_obj = FD.PassageObjectFor(obj)
-
-	if passage_obj and passage_obj ~= obj then
-		obj = passage_obj
-	end
-
-	if FD.IsDome(obj) then
-		FD.DisableDomeLights(obj)
-	else
-		FD.DisableObjectLights(obj)
-	end
-
-	if FD.IsResourceDepositObject(obj) or FD.IsMarker(obj) then
-		FD.UnregisterDepositObject(obj)
-		FD.PruneObjectFromGlobalLabels(obj)
-	end
-
-	if FD.IsDome(obj) then
-		FD.ResetDomeTerrain(obj)
-		FD.ClearDomeVisuals(obj)
-	end
-
-	local ok = pcall(function()
-		local set_command = FD.ReadField(obj, "SetCommand")
-
-		if FD.IsPassageObject(obj) then
-			FD.PreparePassageForDelete(obj)
-		end
-
-		if FD.IsColonist(obj) then
-			FD.NeutralizeColonistStatusSigns(obj)
-
-			if type(set_command) == "function" and type(FD.ReadField(obj, "Erase")) == "function" then
-				obj:SetCommand("Erase")
-				return
-			end
-
-			if type(FD.ReadField(obj, "delete")) == "function" then
-				obj:delete()
-				return
-			end
-
-			FD.SafeCall(FD.Global("DoneObject"), obj)
-			return
-		end
-
-		if FD.IsAnimal(obj) then
-			if type(set_command) == "function" and type(FD.ReadField(obj, "Die")) == "function" then
-				obj:SetCommand("Die")
-				return
-			end
-
-			if type(FD.ReadField(obj, "Die")) == "function" then
-				obj:Die()
-				return
-			end
-
-			if type(FD.ReadField(obj, "delete")) == "function" then
-				obj:delete()
-				return
-			end
-
-			FD.SafeCall(FD.Global("DoneObject"), obj)
-			return
-		end
-
-		if FD.IsKindOf(obj, "Drone") or FD.ClassName(obj):find("Drone", 1, true) ~= nil then
-			if type(set_command) == "function" and type(FD.ReadField(obj, "DieNow")) == "function" then
-				obj:SetCommand("DieNow")
-				return
-			end
-
-			if type(FD.ReadField(obj, "DieNow")) == "function" then
-				obj:DieNow()
-				return
-			end
-
-			if type(FD.ReadField(obj, "delete")) == "function" then
-				obj:delete()
-				return
-			end
-
-			FD.SafeCall(FD.Global("DoneObject"), obj)
-			return
-		end
-
-		if type(FD.ReadField(obj, "delete")) == "function" then
-			obj:delete()
-			return
-		end
-
-		FD.SafeCall(FD.Global("DoneObject"), obj)
-	end)
-
-	return ok
-end
-
-
--- ============================================================================
--- fd_undo.lua
--- ============================================================================
-
-function FD.IsUndoTrackableObject(obj)
-	if type(obj) ~= "table" then
-		return false
-	end
-
-	if FD.ReadField(obj, "class") then
-		return true
-	end
-
-	if FD.ReadField(obj, "Index") then
-		return true
-	end
-
-	return false
-end
-
--- Return whether a delete batch should skip editor undo tracking.
-
-function FD.ShouldSkipDeleteUndo(objects_to_delete)
-	for _, obj in ipairs(objects_to_delete) do
-		if FD.IsResourceDepositObject(obj) or FD.IsMarker(obj) then
-			return true
-		end
-	end
-
-	return false
-end
-
--- Start an optional editor undo operation for compatible delete batches.
-
-function FD.BeginDeleteUndo(objects_to_delete)
-	if FD.ShouldSkipDeleteUndo(objects_to_delete) then
-		return false
-	end
-
-	local undo = FD.Global("XEditorUndo")
-
-	if not undo or type(FD.ReadField(undo, "BeginOp")) ~= "function" then
-		return false
-	end
-
-	local undo_objects = {}
-
-	for _, obj in ipairs(objects_to_delete) do
-		if FD.IsUndoTrackableObject(obj) then
-			undo_objects[#undo_objects + 1] = obj
-		end
-	end
-
-	if #undo_objects == 0 then
-		return false
-	end
-
-	return pcall(function()
-		undo:BeginOp({
-			objects = undo_objects,
-			name = string.format("Force Delete hard-deleted %d object(s)", #objects_to_delete),
-		})
-	end)
-end
-
-function FD.EndDeleteUndo(undo_started)
-	if not undo_started then
+		FD.DisplayAttributes.ShowMessage("No object selected.")
 		return
 	end
 
-	local undo = FD.Global("XEditorUndo")
-
-	if undo and type(FD.ReadField(undo, "EndOp")) == "function" then
-		pcall(function()
-			undo:EndOp()
-		end)
-	end
-end
-
--- Delete selected root objects with the same broad path used by Attribute Inspector.
-
-
--- ============================================================================
--- fd_light_delete.lua
--- ============================================================================
-
--- Check whether the selected object can use the normal demolish pipeline.
-function FD.CanForceDelete(obj)
-	return FD.IsObjectValid(obj)
-		and not FD.IsLightDeleteProtected(obj)
-		and FD.IsKindOf(obj, "Demolishable")
-		and FD.SafeCall(obj.CanDemolish, obj)
-end
-
--- Stop any pending demolition countdown thread before forcing demolition now.
-function FD.StopDemolitionThread(obj)
-	local thread = FD.ReadField(obj, "demolishing_thread")
-
-	if FD.SafeCall(FD.Global("IsValidThread"), thread) then
-		FD.SafeCall(FD.Global("DeleteThread"), thread)
-	end
-
-	FD.WriteField(obj, "demolishing_thread", false)
-end
-
-function FD.LightDeleteTargetObject()
-	local obj = FD.Global("SelectedObj")
-
-	if FD.IsObjectValid(obj) then
-		return obj
-	end
-
-	local selected_objects = FD.SelectedObjects()
-
-	return selected_objects[1]
-end
-
-function FD.DemolishObjectNow(obj)
-	if not FD.CanForceDelete(obj) then
-		return false
-	end
-
-	FD.WriteField(obj, "demolishing", true)
-	FD.WriteField(obj, "demolishing_countdown", 0)
-	FD.StopDemolitionThread(obj)
-	FD.SafeCall(FD.Global("SelectObj"), false)
-
-	local ok = pcall(function()
-		obj:DoDemolish()
-	end)
-
-	return ok
-end
-
--- Return whether the object can be passed through the game's demolition code.
--- This is intentionally less restrictive than CanForceDelete(): hard delete uses
--- this to force-start the normal demolition pipeline even when CanDemolish()
--- would refuse because of ordinary game rules. It still requires the object to
--- be a Demolishable engine object with DoDemolish().
-function FD.CanUseGameDemolitionPipeline(obj)
-	return FD.IsObjectValid(obj)
-		and not FD.IsLightDeleteProtected(obj)
-		and FD.IsKindOf(obj, "Demolishable")
-		and type(FD.ReadField(obj, "DoDemolish")) == "function"
-end
-
--- Force-start the game's own demolition transition. This should be preferred
--- for live buildings because DoDemolish owns grid, request, label, passage, and
--- building-internal teardown. Direct DoneObject/delete is reserved for objects
--- that cannot go through this path.
-function FD.DemolishObjectNowRaw(obj)
-	if not FD.CanUseGameDemolitionPipeline(obj) then
-		return false
-	end
-
-	FD.WriteField(obj, "demolishing", true)
-	FD.WriteField(obj, "demolishing_countdown", 0)
-	FD.StopDemolitionThread(obj)
-	FD.SafeCall(FD.Global("SelectObj"), false)
-
-	local ok = pcall(function()
-		obj:DoDemolish()
-	end)
-
-	return ok
-end
-
--- Minimal pre-cleanup before using the normal demolition pipeline. Do not mark
--- the building as force-delete-detached here and do not neutralize its class
--- methods; DoDemolish may need those methods to unregister the object cleanly.
-function FD.PrepareObjectForStagedDemolition(obj)
-	if not FD.IsObjectValid(obj) then
+	if FD.Colonist and FD.Colonist.IsColonist and FD.Colonist.IsColonist(obj) then
+		FD.Colonist.OnSelected(obj)
 		return
 	end
 
-	-- Animals/pets held by domes are not reliably cleaned up by immediate forced
-	-- demolition, so delete them first. Colonists are detached, not deleted.
-	if FD.IsDome(obj) then
-		FD.DeleteContainedAnimals(obj)
-	end
-
-	FD.DetachContainedColonists(obj)
+	FD.DisplayAttributes.ShowMessage("Selected object is not supported yet.")
 end
 
-function FD.StagedDemolishNonDomeObject(obj)
-	if not FD.CanUseGameDemolitionPipeline(obj) then
-		return false
-	end
-
-	FD.PrepareObjectForStagedDemolition(obj)
-	return FD.DemolishObjectNowRaw(obj)
-end
-
-function FD.StagedDemolishObject(obj)
-	if not FD.CanUseGameDemolitionPipeline(obj) then
-		return false
-	end
-
-	-- Domes own interior buildings and dome-local grid state. Demolishing the
-	-- dome alone can leave still-live internal buildings that later touch stale
-	-- supply-grid cells. First stage-demolish internal buildings, then let the
-	-- game's own dome DoDemolish() remove the dome.
-	if FD.IsDome(obj) and type(FD.StagedDemolishDome) == "function" then
-		return FD.StagedDemolishDome(obj)
-	end
-
-	return FD.StagedDemolishNonDomeObject(obj)
-end
-
-function FD.StagedDemolishAndHardRemoveObject(obj)
-	if not FD.CanUseGameDemolitionPipeline(obj) then
-		return false
-	end
-
-	if FD.IsDome(obj) and type(FD.StagedDemolishDome) == "function" then
-		return FD.StagedDemolishDome(obj)
-	end
-
-	if not FD.StagedDemolishNonDomeObject(obj) then
-		return false
-	end
-
-	return FD.HardRemoveAfterStagedDemolition(obj)
-end
-
-function FD.ShouldTryStagedDemolition(obj)
-	if not FD.IsObjectValid(obj) then
-		return false
-	end
-
-	-- Deposits, markers, orphan visuals, and grid elements are the cases where
-	-- direct hard deletion is usually the intended repair path.
-	if FD.IsResourceDepositObject(obj) or FD.IsMarker(obj) or FD.IsLightDeleteGridElement(obj) then
-		return false
-	end
-
-	return FD.CanUseGameDemolitionPipeline(obj)
-end
-
-
-function FD.IsDomeInteriorDemolitionCandidate(dome, obj)
-	if not FD.IsObjectValid(dome) or not FD.IsObjectValid(obj) then
-		return false
-	end
-
-	if obj == dome then
-		return false
-	end
-
-	if FD.IsProtectedUnit(obj) or FD.IsAnimal(obj) then
-		return false
-	end
-
-	if FD.IsResourceDepositObject(obj) or FD.IsMarker(obj) then
-		return false
-	end
-
-	if FD.IsDomeVisualAttach(obj) or FD.IsComponentLightObject(obj) then
-		return false
-	end
-
-	return FD.CanUseGameDemolitionPipeline(obj)
-end
-
-function FD.AddDomeInteriorDemolitionObject(dome, objects, seen, obj)
-	local passage_obj = FD.PassageObjectFor(obj)
-
-	if passage_obj then
-		obj = passage_obj
-	end
-
-	if not FD.IsDomeInteriorDemolitionCandidate(dome, obj) or seen[obj] then
-		return
-	end
-
-	seen[obj] = true
-	objects[#objects + 1] = obj
-end
-
-function FD.CollectDomeInteriorDemolitionObjects(dome)
-	local objects = {}
-	local seen = {}
-
-	if not FD.IsDome(dome) then
-		return objects
-	end
-
-	local function add(obj)
-		FD.AddDomeInteriorDemolitionObject(dome, objects, seen, obj)
-	end
-
-	-- Most inside-dome buildings are reachable through the dome label table.
-	local labels = FD.ReadField(dome, "labels")
-
-	if type(labels) == "table" then
-		for _, label_list in pairs(labels) do
-			FD.ForEachTableObject(label_list, add, FD.MAX_CONTAINED_LABEL_SCAN)
+-- React to a selection change and refresh diagnostics only when the object
+-- actually changes. This prevents periodic polling from redrawing constantly.
+function FD.OnSelectionChanged(obj, force)
+	if not force and obj == FD.last_selected_object then
+		if FD.DisplayAttributes and FD.DisplayAttributes.RefreshPanelIfMissing then
+			FD.DisplayAttributes.RefreshPanelIfMissing()
 		end
+		return
 	end
 
-	-- Some builds/versions keep explicit lists instead of, or in addition to,
-	-- labels. Scan the common container fields conservatively.
-	for _, field in ipairs({
-		"buildings",
-		"inside_buildings",
-		"service_buildings",
-		"residence_buildings",
-		"workplace_buildings",
-		"attached_buildings",
-		"children",
-		"elements",
+	FD.last_selected_object = obj
+	FD.DispatchSelectedObject(obj)
+end
+
+-- Start lightweight selection monitoring. Message hooks catch normal UI
+-- changes, while polling covers engine paths that do not broadcast reliably.
+function FD.StartSelectionMonitor()
+	if FD.selection_monitor_started then
+		FD.OnSelectionChanged(FD.SelectedObject(), true)
+		return
+	end
+
+	FD.selection_monitor_started = true
+
+	-- Refresh from the current selection source and let OnSelectionChanged decide
+	-- whether the panel actually needs to update.
+	local function refresh()
+		FD.OnSelectionChanged(FD.SelectedObject())
+	end
+
+	-- Force a redraw after UI rebuilds because earlier attempts may have fallen
+	-- back to the log before the in-game parent window existed.
+	local function refresh_force()
+		FD.OnSelectionChanged(FD.SelectedObject(), true)
+	end
+
+	for _, message_name in ipairs({
+		"SelectedObjChange",
+		"SelectionChange",
+		"SelectionAdded",
+		"SelectionRemoved",
+		"GameEnterEditor",
+		"GameExitEditor",
 	}) do
-		FD.ForEachTableObject(FD.ReadField(dome, field), add, FD.MAX_CONTAINED_LABEL_SCAN)
+		FD.ChainOnMsg(message_name, "selection_monitor", refresh)
 	end
 
-	-- Final fallback: scan visible city/colony labels for Demolishable objects
-	-- whose dome/parent fields point at this dome. This catches internal
-	-- buildings that were omitted from dome.labels.
-	local containers = {
-		FD.ReadField(dome, "city"),
-		FD.Global("UICity"),
-		FD.Global("MainCity"),
-		FD.Global("SelectedCity"),
-		FD.Global("UIColony"),
-	}
-	local seen_containers = {}
+	FD.ChainOnMsg("InGameInterfaceCreated", "selection_monitor", refresh_force)
 
-	for _, container in ipairs(containers) do
-		if container and not seen_containers[container] then
-			seen_containers[container] = true
-			local container_labels = FD.ReadField(container, "labels")
-
-			if type(container_labels) == "table" then
-				for _, label_list in pairs(container_labels) do
-					FD.ForEachTableObject(label_list, function(candidate)
-						if FD.ReadField(candidate, "dome") == dome
-							or FD.ReadField(candidate, "parent_dome") == dome
-							or FD.ReadField(candidate, "parent") == dome then
-							add(candidate)
-						end
-					end, FD.MAX_CONTAINED_LABEL_SCAN)
+	local create_thread = FD.Global("CreateGameTimeThread") or FD.Global("CreateRealTimeThread")
+	if type(create_thread) == "function" then
+		-- Poll as a fallback for selection paths that do not emit a reliable UI
+		-- message. The polling is intentionally slow and change-gated.
+		create_thread(function()
+			local sleep = FD.Global("Sleep")
+			while true do
+				refresh()
+				if type(sleep) == "function" then
+					sleep(FD.POLL_INTERVAL_MS)
+				else
+					break
 				end
 			end
-		end
+		end)
 	end
 
-	return objects
+	FD.OnSelectionChanged(FD.SelectedObject(), true)
 end
 
-function FD.StagedDemolishDome(dome)
-	if not FD.CanUseGameDemolitionPipeline(dome) then
+-- ============================================================================
+-- Shortcut registration
+-- ============================================================================
+
+-- Check whether an action is already present on a shortcut target. A local
+-- registry is used as a fallback when the target does not expose ActionById.
+local function action_exists(parent, action_id)
+	if parent == nil then
 		return false
 	end
 
-	-- Remove animals/pets first, then detach colonists. They should not be
-	-- hard-deleted as ordinary contained objects.
-	FD.DeleteContainedAnimals(dome)
-
-	local staged_children = {}
-
-	-- Interior buildings must still be staged through DoDemolish first.  Do not
-	-- remove them until after every interior building has entered the game's own
-	-- demolition path. This preserves the behavior that fixed the dome-interior
-	-- supply-grid problem, then removes the leftover demolished structures.
-	for _, child in ipairs(FD.CollectDomeInteriorDemolitionObjects(dome)) do
-		if FD.StagedDemolishNonDomeObject(child) then
-			staged_children[#staged_children + 1] = child
-		end
-	end
-
-	FD.DetachContainedColonists(dome)
-
-	local dome_demolished = FD.DemolishObjectNowRaw(dome)
-
-	-- Once all interior buildings and the dome have gone through DoDemolish(),
-	-- hard-remove the remaining demolished structures immediately.
-	for _, child in ipairs(staged_children) do
-		FD.HardRemoveAfterStagedDemolition(child)
-	end
-
-	if dome_demolished then
-		return FD.HardRemoveAfterStagedDemolition(dome)
-	end
-
-	return #staged_children > 0
-end
-
--- Ctrl+Delete: run the normal demolition path when possible.
-function FD.FD_LightDeleteSelectedObject()
-	local obj = FD.LightDeleteTargetObject()
-
-	if not FD.IsObjectValid(obj) then
-		return false
-	end
-
-	local passage_obj = FD.PassageObjectFor(obj)
-
-	if passage_obj then
-		obj = passage_obj
-	end
-
-	-- Passage elements often resolve to the passage controller only after one
-	-- input cycle. Resolve that controller immediately so Ctrl+Delete deletes
-	-- the passage with a single key press instead of requiring a second press.
-	if FD.IsPassageObject(obj) then
-		FD.SafeCall(FD.Global("SelectObj"), false)
-
-		if FD.DemolishObjectNow(obj) then
-			return true
-		end
-
-		return FD.DeleteObject(obj)
-	end
-
-	-- Domes must use the engine demolition pipeline. Direct hard-delete can leave
-	-- stale supply-grid or stockpile state behind. Staged demolition deletes dome
-	-- animals, detaches colonists, and then calls DoDemolish().
-	if FD.IsDome(obj) then
-		return FD.StagedDemolishObject(obj)
-	end
-
-	if FD.DemolishObjectNow(obj) then
+	FD.shortcut_actions_by_parent = FD.shortcut_actions_by_parent or {}
+	local local_actions = FD.shortcut_actions_by_parent[parent]
+	if local_actions and local_actions[action_id] then
 		return true
 	end
 
-	if not FD.IsLightDeleteGridElement(obj) then
-		return false
+	local action_by_id = FD.ReadField(parent, "ActionById")
+	if type(action_by_id) == "function" then
+		local action = FD.SafeCall(function()
+			return action_by_id(parent, action_id)
+		end)
+		return action ~= nil and action ~= false
 	end
 
-	FD.SafeCall(FD.Global("SelectObj"), false)
-	return FD.DeleteObject(obj)
+	return false
 end
 
--- Compatibility alias for the original single-file function name.
-FD.ForceDeleteSelectedObject = FD.FD_LightDeleteSelectedObject
-
-
--- ============================================================================
--- fd_hard_delete.lua
--- ============================================================================
-
-function FD.PruneContainerLabels(container, delete_set)
-	local labels = FD.ReadField(container, "labels")
-
-	if type(labels) ~= "table" then
+-- Remember actions created by this module so retries stay idempotent even on
+-- shortcut containers without a query API.
+local function mark_action_registered(parent, action_id)
+	if parent == nil then
 		return
 	end
 
-	FD.PruneLabelsTable(labels, delete_set, true)
+	FD.shortcut_actions_by_parent = FD.shortcut_actions_by_parent or {}
+	FD.shortcut_actions_by_parent[parent] = FD.shortcut_actions_by_parent[parent] or {}
+	FD.shortcut_actions_by_parent[parent][action_id] = true
 end
 
-function FD.PruneDeleteLabels(objects_to_delete)
-	local delete_set = {}
-
-	for _, obj in ipairs(objects_to_delete) do
-		delete_set[obj] = true
-	end
-
-	for _, obj in ipairs(objects_to_delete) do
-		if FD.IsObjectValid(obj) then
-			FD.PruneContainerLabels(obj, delete_set)
-		end
-	end
-
-	FD.PruneObjectsFromGlobalLabels(delete_set)
-end
-
--- Run unit cleanup before physical objects are deleted.
-function FD.PreDeleteCleanup(objects_to_delete)
-	local delete_set = {}
-
-	FD.PatchDroneResourceMethodGuards()
-
-	for _, obj in ipairs(objects_to_delete) do
-		delete_set[obj] = true
-		FD.MarkForceDeleteDetached(obj)
-	end
-
-	-- Prevent queued drone/resource callbacks from running on objects that are
-	-- about to lose their stockpile/map state. This avoids ResourceStockpile
-	-- UpdateVisualStockpile assertions during dome hard-delete.
-	FD.NeutralizeDroneResourceCallbacksForDelete(objects_to_delete)
-
-	FD.ResetDronesTargetingDeletedObjects(objects_to_delete, delete_set)
-	FD.CleanupStockpileReferences(objects_to_delete, delete_set)
-
-	for _, obj in ipairs(objects_to_delete) do
-		if FD.IsObjectValid(obj) then
-			FD.DetachContainedColonists(obj)
-			FD.DeleteContainedAnimals(obj)
-		end
-	end
-end
-
-function FD.HardDeleteRootObjects(root_objects)
-	local objects_to_delete = {}
-	local seen = {}
-	local did_staged_demolish = false
-
-	for _, obj in ipairs(root_objects or {}) do
-		if FD.IsObjectValid(obj) then
-			local passage_obj = FD.PassageObjectFor(obj)
-			local root_obj = passage_obj or obj
-
-			-- Hard delete is now staged for live Demolishable objects. First try the
-			-- game's normal DoDemolish transition so grids, requests, labels, and
-			-- building internals are unregistered by engine-owned code. If that path
-			-- is unavailable or fails, fall back to the direct hard-delete collector.
-			if FD.ShouldTryStagedDemolition(root_obj) then
-				if FD.StagedDemolishAndHardRemoveObject(root_obj) then
-					did_staged_demolish = true
-				elseif not FD.IsDome(root_obj) then
-					FD.CollectDeleteObjects(root_obj, objects_to_delete, seen, true)
-				end
-			else
-				FD.CollectDeleteObjects(root_obj, objects_to_delete, seen, true)
-			end
-		end
-	end
-
-	if #objects_to_delete == 0 then
-		if did_staged_demolish then
-			FD.ClearSelection()
-			return true
-		end
-
+-- Add the diagnostic shortcuts to a shortcut target. Level 2 is registered
+-- first so Ctrl+Shift+Delete does not get consumed by Ctrl+Delete.
+function FD.AddForceDeleteActions(parent, context)
+	local x_action = FD.Global("XAction")
+	if parent == nil or type(x_action) ~= "table" or type(x_action.new) ~= "function" then
 		return false
 	end
 
-	local rebuild_render_objects = FD.NeedsRenderObjectsRebuild(objects_to_delete)
-	local undo_started = FD.BeginDeleteUndo(objects_to_delete)
-
-	FD.SafeCall(FD.Global("SuspendPassEditsForEditOp"))
-	FD.SafeCall(FD.Global("Msg"), "EditorCallback", "EditorCallbackDelete", objects_to_delete)
-
-	FD.PreDeleteCleanup(objects_to_delete)
-	FD.PruneDeleteLabels(objects_to_delete)
-
-	for _, obj in ipairs(objects_to_delete) do
-		FD.DeleteObject(obj)
+	if not action_exists(parent, FD.LVL2_ACTION_ID) then
+		x_action:new({
+			ActionId = FD.LVL2_ACTION_ID,
+			ActionName = "Force Delete Level 2 Diagnostic",
+			ActionShortcut = "Ctrl-Shift-Delete",
+			ActionGamepad = "LeftShoulder-RightShoulder-ButtonY",
+			ActionMode = "Game",
+			ActionBindable = true,
+			IgnoreRepeated = true,
+			-- Diagnostic shortcuts are always enabled because they only show
+			-- feedback and never touch selected game objects.
+			ActionState = function()
+				return "enabled"
+			end,
+			-- Show shortcut feedback only and consume the input so no base-game
+			-- delete behavior runs afterward.
+			OnAction = function()
+				if FD.DisplayAttributes then
+					FD.DisplayAttributes.ShowMessage("Ctrl+Shift+Delete pressed.")
+				end
+				return "break"
+			end,
+		}, parent, context)
+		mark_action_registered(parent, FD.LVL2_ACTION_ID)
 	end
 
-	FD.SafeCall(FD.Global("ResumePassEditsForEditOp"))
-	FD.EndDeleteUndo(undo_started)
-
-	if rebuild_render_objects then
-		FD.SafeCall(FD.Global("RecreateRenderObjects"))
+	if not action_exists(parent, FD.LVL1_ACTION_ID) then
+		x_action:new({
+			ActionId = FD.LVL1_ACTION_ID,
+			ActionName = "Force Delete Level 1 Diagnostic",
+			ActionShortcut = "Ctrl-Delete",
+			ActionGamepad = "LeftShoulder-RightShoulder-ButtonX",
+			ActionMode = "Game",
+			ActionBindable = true,
+			IgnoreRepeated = true,
+			-- Level 1 is enabled in diagnostics for the same reason as Level 2:
+			-- this action is read-only and exists to verify input routing.
+			ActionState = function()
+				return "enabled"
+			end,
+			-- Show shortcut feedback only and consume the input.
+			OnAction = function()
+				if FD.DisplayAttributes then
+					FD.DisplayAttributes.ShowMessage("Ctrl+Delete pressed.")
+				end
+				return "break"
+			end,
+		}, parent, context)
+		mark_action_registered(parent, FD.LVL1_ACTION_ID)
 	end
-
-	FD.ClearSelection()
 
 	return true
 end
 
--- Ctrl+Shift+Delete: broad forced deletion with cleanup and collection.
-function FD.FD_HardDeleteSelectedObjects()
-	return FD.HardDeleteRootObjects(FD.SelectedObjects())
-end
-
--- Compatibility alias for the original single-file function name.
-FD.HardForceDeleteSelectedObjects = FD.FD_HardDeleteSelectedObjects
-
-
--- ============================================================================
--- fd_shortcuts.lua
--- ============================================================================
-
--- Register the bindable delete actions in the game shortcut container.
-function FD.AddForceDeleteActions(parent, context)
-	local x_action = FD.Global("XAction")
-
-	if not x_action then
-		return
+-- Patch GameShortcuts.Init once and also try the live shortcut target when it
+-- exists. This makes reloads and late UI initialization more forgiving.
+function FD.PatchGameShortcuts()
+	local live_target = FD.Global("XShortcutsTarget")
+	if live_target then
+		FD.AddForceDeleteActions(live_target)
 	end
 
-	-- Register the hard action first. Some XAction/input paths may treat
-	-- Ctrl+Shift+Delete as also matching Ctrl+Delete. If the light action is
-	-- registered first, it can consume the shortcut before hard delete runs.
-	x_action:new({
-		ActionId = FD.HARD_ACTION_ID,
-		ActionMode = "Game",
-		ActionTranslate = false,
-		ActionName = "Hard Force Delete Selected",
-		ActionShortcut = "Ctrl-Shift-Delete",
-		ActionGamepad = "LeftShoulder-RightShoulder-ButtonY",
-		ActionBindable = true,
-		ActionState = function()
-			return FD.HasSelectedObject() and "enabled" or "disabled"
-		end,
-		OnAction = function()
-			if not FD.IsHudVisible() then
-				return "break"
-			end
+	if FD.shortcuts_patched then
+		return true
+	end
 
-			FocusInfopanel = false
-			FD.FD_HardDeleteSelectedObjects()
-
-			return "break"
-		end,
-		IgnoreRepeated = true,
-	}, parent, context)
-
-	x_action:new({
-		ActionId = FD.LIGHT_ACTION_ID,
-		ActionMode = "Game",
-		ActionTranslate = false,
-		ActionName = "Light Force Delete Selected",
-		ActionShortcut = "Ctrl-Delete",
-		ActionGamepad = "LeftShoulder-RightShoulder-ButtonX",
-		ActionBindable = true,
-		-- Keep Ctrl+Delete enabled for selected objects so unsafe light deletes can no-op
-		-- without falling through to the game's devtools slab shortcut.
-		ActionState = function()
-			return FD.HasSelectedObject() and "enabled" or "disabled"
-		end,
-		OnAction = function()
-			if not FD.IsHudVisible() then
-				return "break"
-			end
-
-			FocusInfopanel = false
-			FD.FD_LightDeleteSelectedObject()
-
-			return "break"
-		end,
-		IgnoreRepeated = true,
-	}, parent, context)
-end
-
--- Patch GameShortcuts once; the function is safe to retry while classes load.
-function FD.PatchGameShortcuts()
 	local game_shortcuts = FD.Global("GameShortcuts")
-
-	if FD.shortcuts_patched or not game_shortcuts or type(game_shortcuts.Init) ~= "function" then
-		return
+	if type(game_shortcuts) ~= "table" or type(game_shortcuts.Init) ~= "function" then
+		return false
 	end
 
 	local original_init = game_shortcuts.Init
 
-	-- Add the Ctrl+Delete shortcut action after the base shortcut container initializes.
-	function game_shortcuts:Init(parent, context)
-		original_init(self, parent, context)
+	-- Extend the engine shortcut initialization while preserving its original
+	-- behavior. Actions are added after the base container is ready.
+	game_shortcuts.Init = function(self, parent, context, ...)
+		local result = original_init(self, parent, context, ...)
 		FD.AddForceDeleteActions(parent, context)
+		return result
 	end
 
 	FD.shortcuts_patched = true
+	return true
 end
 
--- Preserve any existing OnMsg handler while also retrying shortcut registration.
-function FD.ChainOnMsg(message_name, handler)
-	local previous = OnMsg[message_name]
+-- Retry shortcut registration at common data/UI lifecycle points.
+function FD.InstallShortcutRetryHandlers()
+	-- ClassesPostprocess is a common point where XAction classes become usable.
+	FD.ChainOnMsg("ClassesPostprocess", "shortcut_retry", function()
+		FD.LoadSupportModules()
+		FD.PatchGameShortcuts()
+	end)
 
-	-- Call the existing message handler first, then this mod's retry hook.
-	OnMsg[message_name] = function(...)
-		if previous then
-			previous(...)
-		end
-
-		handler(...)
-	end
+	-- DataLoaded catches reloads where the shortcut target appears later.
+	FD.ChainOnMsg("DataLoaded", "shortcut_retry", function()
+		FD.LoadSupportModules()
+		FD.PatchGameShortcuts()
+	end)
 end
 
--- Retry shortcut registration and method guards after class post-processing.
-FD.ChainOnMsg("ClassesPostprocess", function(...)
-	FD.PatchDroneResourceMethodGuards()
-	FD.PatchGameShortcuts(...)
-end)
-
--- Retry shortcut registration and method guards after data loading.
-FD.ChainOnMsg("DataLoaded", function(...)
-	FD.PatchDroneResourceMethodGuards()
-	FD.PatchGameShortcuts(...)
-end)
-
-FD.PatchDroneResourceMethodGuards()
+-- Bootstrap the read-only diagnostic infrastructure.
+FD.InstallShortcutRetryHandlers()
 FD.PatchGameShortcuts()
+FD.StartSelectionMonitor()
