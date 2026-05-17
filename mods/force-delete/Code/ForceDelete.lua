@@ -112,6 +112,17 @@ local function IsLightDeleteProtected(obj)
 		or class_name:find("Drone", 1, true) ~= nil
 end
 
+-- Detect grid pieces that should be allowed through the light-delete shortcut.
+local function IsLightDeleteGridElement(obj)
+	local class_name = ClassName(obj)
+
+	return IsObjectValid(obj)
+		and (IsKindOf(obj, "ElectricityGridElement")
+			or IsKindOf(obj, "LifeSupportGridElement")
+			or class_name:find("ElectricityGridElement", 1, true) ~= nil
+			or class_name:find("LifeSupportGridElement", 1, true) ~= nil)
+end
+
 -- Check whether the selected object can use the normal demolish pipeline.
 local function CanForceDelete(obj)
 	return IsObjectValid(obj)
@@ -131,12 +142,19 @@ local function StopDemolitionThread(obj)
 	obj.demolishing_thread = false
 end
 
+local DeleteObject
+
 -- Run the selected object's normal demolition cleanup immediately.
 local function ForceDeleteSelectedObject()
 	local obj = Global("SelectedObj")
 
 	if not CanForceDelete(obj) then
-		return false
+		if not IsLightDeleteGridElement(obj) then
+			return false
+		end
+
+		SafeCall(Global("SelectObj"), false)
+		return DeleteObject(obj)
 	end
 
 	obj.demolishing = true
@@ -973,7 +991,7 @@ local function PreDeleteCleanup(objects_to_delete)
 	end
 end
 
-local function DeleteObject(obj)
+DeleteObject = function(obj)
 	if not IsObjectValid(obj) then
 		return false
 	end
