@@ -206,9 +206,62 @@ function FD.SelectedObject()
 	return FD.IsObjectValid(obj) and obj or false
 end
 
+-- Return the Force Delete object type handled by installed modules.
+function FD.ObjectType(obj)
+	if FD.Colonist and FD.Colonist.IsColonist(obj) then
+		return "colonist"
+	end
+
+	return false
+end
+
+-- Return the configured force-delete level for one object type.
+function FD.ConfiguredLevelForType(object_type)
+	if FD.Config and FD.Config.GetObjectLevel then
+		return FD.Config.GetObjectLevel(object_type)
+	end
+
+	return false
+end
+
+-- Show shortcut feedback without making shortcut handlers know display details.
+function FD.ShowShortcutMessage(message)
+	if FD.DisplayAttributes then
+		FD.DisplayAttributes.ShowMessage(message)
+	end
+end
+
+-- Return the configured attribute refresh interval with a safe fallback.
+function FD.AttributeRefreshInterval()
+	if FD.Config and FD.Config.GetAttributeRefreshInterval then
+		return FD.Config.GetAttributeRefreshInterval()
+	end
+
+	return 250
+end
+
+-- Delete one object by delegating to the module that owns its type.
+function FD.DeleteObjectByType(obj, object_type)
+	if object_type == "colonist" and FD.Colonist and FD.Colonist.Delete then
+		return FD.Colonist.Delete(obj)
+	end
+
+	return false
+end
+
 -- Send the selected object to the first diagnostic module that supports it.
 function FD.RefreshSelectionDiagnostics()
 	if not FD.DisplayAttributes then
+		return
+	end
+
+	local obj = FD.SelectedObject()
+	if obj ~= FD.last_selected_object then
+		FD.last_selected_object = obj
+		FD.shortcut_feedback_active = false
+	end
+
+	if FD.shortcut_feedback_active then
 		return
 	end
 
@@ -217,7 +270,6 @@ function FD.RefreshSelectionDiagnostics()
 		return
 	end
 
-	local obj = FD.SelectedObject()
 	if not FD.IsObjectValid(obj) then
 		FD.DisplayAttributes.ShowMessage("No object selected.")
 	elseif FD.Colonist and FD.Colonist.IsColonist(obj) then
@@ -225,6 +277,79 @@ function FD.RefreshSelectionDiagnostics()
 	else
 		FD.DisplayAttributes.ShowMessage("Selected object is not supported yet.")
 	end
+end
+
+-- Start a lightweight polling thread so changing fields refresh without reselection.
+function FD.StartAttributeRefreshMonitor()
+	if FD.attribute_refresh_monitor_started then
+		return
+	end
+
+	local create_thread = FD.Global("CreateRealTimeThread") or FD.Global("CreateGameTimeThread")
+	local sleep = FD.Global("Sleep")
+	if type(create_thread) ~= "function" or type(sleep) ~= "function" then
+		return
+	end
+
+	FD.attribute_refresh_monitor_started = true
+
+	-- The monitor only asks the existing dispatcher to refresh; object modules
+	-- still own what attributes are read and displayed.
+	create_thread(function()
+		while true do
+			pcall(FD.RefreshSelectionDiagnostics)
+			sleep(FD.AttributeRefreshInterval())
+		end
+	end)
+end
+
+-- Run one configured force-delete level against the current selection.
+function FD.RunForceDeleteLevel(requested_level, shortcut_message)
+	local obj = FD.SelectedObject()
+
+	if not FD.IsObjectValid(obj) then
+		FD.shortcut_feedback_active = true
+		FD.ShowShortcutMessage(shortcut_message .. "\n\nNo object selected.")
+		return false
+	end
+
+	local object_type = FD.ObjectType(obj)
+	local object_level = FD.ConfiguredLevelForType(object_type)
+
+	if not object_type or not object_level then
+		FD.shortcut_feedback_active = true
+		FD.ShowShortcutMessage(shortcut_message .. "\n\nSelected object is not supported yet.")
+		return false
+	end
+
+	-- Config decides whether this shortcut level may dispatch deletion.
+	if not FD.Config
+		or not FD.Config.CanForceDeleteAtLevel
+		or not FD.Config.CanForceDeleteAtLevel(object_type, requested_level) then
+		FD.shortcut_feedback_active = true
+		FD.ShowShortcutMessage(
+			shortcut_message
+				.. "\n\nSelected "
+				.. object_type
+				.. " is Level "
+				.. FD.SafeToString(object_level)
+				.. "."
+		)
+		return false
+	end
+
+	FD.shortcut_feedback_active = true
+	return FD.DeleteObjectByType(obj, object_type)
+end
+
+-- Level 1 deletes only objects configured for Level 1.
+function FD.RunLevel1ForSelection()
+	return FD.RunForceDeleteLevel(1, "Ctrl+Delete pressed.")
+end
+
+-- Level 2 deletes objects configured for Level 1 or Level 2.
+function FD.RunLevel2ForSelection()
+	return FD.RunForceDeleteLevel(2, "Ctrl+Shift+Delete pressed.")
 end
 
 -- Refresh diagnostics when normal selection messages fire.
@@ -250,7 +375,7 @@ function FD.InstallSelectionHooks()
 end
 
 -- Add one shortcut action unless it already exists on the parent.
-function FD.AddShortcut(parent, context, id, name, shortcut, gamepad, message)
+function FD.AddShortcut(parent, context, id, name, shortcut, gamepad, on_action)
 	if not parent or not XAction then
 		return
 	end
@@ -259,8 +384,8 @@ function FD.AddShortcut(parent, context, id, name, shortcut, gamepad, message)
 		return
 	end
 
-	-- XAction owns the actual game shortcut binding and calls our read-only
-	-- diagnostic callback when the shortcut is pressed.
+	-- XAction owns the actual game shortcut binding and calls the matching
+	-- force-delete level when the shortcut is pressed.
 	XAction:new({
 		ActionId = id,
 		ActionName = name,
@@ -273,8 +398,8 @@ function FD.AddShortcut(parent, context, id, name, shortcut, gamepad, message)
 			return "enabled"
 		end,
 		OnAction = function()
-			if FD.DisplayAttributes then
-				FD.DisplayAttributes.ShowMessage(message)
+			if type(on_action) == "function" then
+				pcall(on_action)
 			end
 			return "break"
 		end,
@@ -290,7 +415,7 @@ function FD.AddDiagnosticShortcuts(parent, context)
 		"Force Delete Level 2 Diagnostic",
 		"Ctrl-Shift-Delete",
 		"LeftShoulder-RightShoulder-ButtonY",
-		"Ctrl+Shift+Delete pressed."
+		FD.RunLevel2ForSelection
 	)
 	FD.AddShortcut(
 		parent,
@@ -299,7 +424,7 @@ function FD.AddDiagnosticShortcuts(parent, context)
 		"Force Delete Level 1 Diagnostic",
 		"Ctrl-Delete",
 		"LeftShoulder-RightShoulder-ButtonX",
-		"Ctrl+Delete pressed."
+		FD.RunLevel1ForSelection
 	)
 end
 
@@ -334,3 +459,4 @@ end
 FD.InstallSelectionHooks()
 FD.InstallShortcutHooks()
 FD.PatchGameShortcuts()
+FD.StartAttributeRefreshMonitor()
