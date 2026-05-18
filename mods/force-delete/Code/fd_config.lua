@@ -15,7 +15,7 @@ FD.Config = FD.Config or {}
 FD.Config.DISPLAY_ATTRIBUTES = true
 
 -- Attribute refresh speed while an object remains selected.
-FD.Config.ATTRIBUTE_REFRESH_INTERVAL_MS = 250
+FD.Config.ATTRIBUTE_REFRESH_INTERVAL_MS = 500
 
 -- Demolishable objects default to Level 1 because the game has a normal demolition path.
 FD.Config.DEMOLISHABLE_OBJECT_LEVEL = 1
@@ -24,11 +24,9 @@ FD.Config.DEMOLISHABLE_OBJECT_LEVEL = 1
 FD.Config.NON_DEMOLISHABLE_OBJECT_LEVEL = 2
 
 -- Optional per-type overrides can pin a type to a specific level when needed.
--- Domes are always Level 2 because passages and internal buildings must be
--- staged before the dome itself, even when the dome is demolishable.
+-- Domes need staged deletion; rockets and rovers own live command state.
 FD.Config.FORCE_DELETE_LEVELS = {
 	dome = 2,
-	deposit = 2,
 	rocket = 2,
 	rover = 2,
 }

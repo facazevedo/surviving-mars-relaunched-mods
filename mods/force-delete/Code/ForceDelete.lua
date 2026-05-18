@@ -179,6 +179,11 @@ function FD.IsDemolishable(obj)
 		return false
 	end
 
+	-- Deposits use marker/sector cleanup, not the building demolition pipeline.
+	if FD.Deposit and type(FD.Deposit.IsDeposit) == "function" and FD.Deposit.IsDeposit(obj) then
+		return false
+	end
+
 	if FD.IsKindOf(obj, "Demolishable") then
 		return true
 	end
@@ -711,7 +716,7 @@ end
 
 -- Return the configured force-delete level for one selected object.
 function FD.ConfiguredLevelForType(object_type, obj)
-	if FD.Config and FD.Config.GetObjectLevel then
+	if FD.Config and type(FD.Config.GetObjectLevel) == "function" then
 		return FD.Config.GetObjectLevel(object_type, obj)
 	end
 
@@ -725,7 +730,7 @@ function FD.CanDeleteAtLevel(object_type, requested_level, obj)
 	end
 
 	return FD.Config
-		and FD.Config.CanForceDeleteAtLevel
+		and type(FD.Config.CanForceDeleteAtLevel) == "function"
 		and FD.Config.CanForceDeleteAtLevel(object_type, requested_level, obj)
 end
 
@@ -743,7 +748,7 @@ end
 
 -- Return the configured attribute refresh interval with a safe fallback.
 function FD.AttributeRefreshInterval()
-	if FD.Config and FD.Config.GetAttributeRefreshInterval then
+	if FD.Config and type(FD.Config.GetAttributeRefreshInterval) == "function" then
 		return FD.Config.GetAttributeRefreshInterval()
 	end
 
@@ -754,7 +759,7 @@ end
 function FD.DeleteObjectByType(obj, object_type)
 	local handler = FD.HandlerForType(object_type)
 
-	if handler and handler.Delete then
+	if handler and type(handler.Delete) == "function" then
 		return handler.Delete(obj)
 	end
 
@@ -765,7 +770,7 @@ end
 function FD.ShowObjectAttributes(obj, object_type)
 	local handler = FD.HandlerForType(object_type)
 
-	if handler and handler.OnSelected then
+	if handler and type(handler.OnSelected) == "function" then
 		handler.OnSelected(obj)
 		return true
 	end

@@ -137,7 +137,6 @@ local function PrepareForDelete(rocket)
 	FD.CallObjectMethod(rocket, "StopDroneControl")
 	FD.CallObjectMethod(rocket, "ClearTradePad")
 	FD.CallObjectMethod(rocket, "ClearDepartures")
-	FD.CallObjectMethod(rocket, "CloseDoor")
 
 	StopThreadField(rocket, "dust_thread")
 	StopThreadField(rocket, "departure_thread")
