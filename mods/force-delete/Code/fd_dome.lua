@@ -177,6 +177,25 @@ local function AddUnique(list, seen, obj)
 	return true
 end
 
+-- Remove one object from an array/hash-style engine table.
+local function RemoveObjectFromTable(list, obj)
+	if type(list) ~= "table" or not obj then
+		return
+	end
+
+	for i = #list, 1, -1 do
+		if list[i] == obj then
+			table.remove(list, i)
+		end
+	end
+
+	for key, value in pairs(list) do
+		if key == obj or value == obj then
+			list[key] = nil
+		end
+	end
+end
+
 -- Visit object-like values in an engine table without scanning indefinitely.
 -- A callback may return true to stop the scan early.
 local function ForEachTableObject(list, callback)
@@ -950,6 +969,64 @@ function Dome.DeleteObjects(objects)
 	return CountSuccessfulActions(objects, FD.Level2DeleteObject)
 end
 
+-- Remove stale references from one table before the dome's Done handler runs.
+function Dome.PruneDeleteReferencesFromTable(list, delete_set)
+	if type(list) ~= "table" then
+		return
+	end
+
+	for obj in pairs(delete_set or {}) do
+		RemoveObjectFromTable(list, obj)
+	end
+
+	for i = #list, 1, -1 do
+		local obj = list[i]
+		if (type(obj) == "table" or type(obj) == "userdata")
+			and not FD.IsObjectValid(obj)
+		then
+			table.remove(list, i)
+		end
+	end
+
+	for key, value in pairs(list) do
+		local key_is_object = type(key) == "table" or type(key) == "userdata"
+		local value_is_object = type(value) == "table" or type(value) == "userdata"
+
+		if key_is_object and not FD.IsObjectValid(key)
+			or value_is_object and not FD.IsObjectValid(value)
+		then
+			list[key] = nil
+		end
+	end
+end
+
+-- Remove deleted passages/buildings from dome labels and connection tables.
+function Dome.PruneDeletedDomeReferences(dome, passages, internal_buildings)
+	if not Dome.IsDome(dome) then
+		return
+	end
+
+	local delete_set = {}
+
+	for _, obj in ipairs(passages or {}) do
+		delete_set[obj] = true
+	end
+
+	for _, obj in ipairs(internal_buildings or {}) do
+		delete_set[obj] = true
+	end
+
+	local labels = FD.ReadField(dome, "labels")
+	if type(labels) == "table" then
+		for _, label_list in pairs(labels) do
+			Dome.PruneDeleteReferencesFromTable(label_list, delete_set)
+		end
+	end
+
+	Dome.PruneDeleteReferencesFromTable(FD.ReadField(dome, "passages"), delete_set)
+	Dome.PruneDeleteReferencesFromTable(FD.ReadField(dome, "connected_passages"), delete_set)
+end
+
 -- Demolish one passage and run Level 2 only if demolition left it valid.
 function Dome.DeletePassageSequentially(passage)
 	if not Dome.IsPassageController(passage) then
@@ -1084,6 +1161,7 @@ function Dome.Delete(dome)
 	local passages_remaining = Dome.CountConnectedPassages(dome)
 	local internal_demolished = Dome.DemolishObjects(internal_buildings)
 	local internal_deleted = Dome.DeleteObjects(internal_buildings)
+	Dome.PruneDeletedDomeReferences(dome, passages, internal_buildings)
 	lights_destroyed = lights_destroyed + Dome.DisableDomeLights(dome)
 	local dome_demolished, dome_deleted = Dome.DeleteDomeShell(dome)
 	local result = {

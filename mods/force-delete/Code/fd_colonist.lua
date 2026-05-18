@@ -216,26 +216,6 @@ local function EnsureValidPosition(colonist)
 	return false
 end
 
--- Stop a colonist command without allowing stale command destructors to run.
-local function StopCommandNoDestructors(colonist)
-	FD.WriteField(colonist, "command_destructors", false)
-	FD.WriteField(colonist, "command_queue", nil)
-	FD.WriteField(colonist, "forced_cmd_importance", nil)
-
-	for _, thread in ipairs({
-		FD.ReadField(colonist, "command_thread"),
-		FD.ReadField(colonist, "thread_running_destructors"),
-	}) do
-		if FD.SafeCall(FD.Global("IsValidThread"), thread) then
-			FD.SafeCall(FD.Global("DeleteThread"), thread)
-		end
-	end
-
-	FD.WriteField(colonist, "command_thread", nil)
-	FD.WriteField(colonist, "thread_running_destructors", nil)
-	FD.WriteField(colonist, "command", "Idle")
-end
-
 -- Clear movement and visit state that may reference soon-deleted objects.
 local function PrepareForRelatedObjectDelete(colonist)
 	EnsureValidPosition(colonist)
@@ -349,7 +329,7 @@ function Colonist.IdleForRelatedObjectDelete(colonist)
 	end
 
 	PrepareForRelatedObjectDelete(colonist)
-	StopCommandNoDestructors(colonist)
+	FD.StopCommandNoDestructors(colonist)
 	return true
 end
 

@@ -56,26 +56,6 @@ local related_delete_fields = {
 	"dest_dome",
 }
 
--- Stop a shuttle command without running stale command destructors.
-local function StopCommandNoDestructors(shuttle)
-	FD.WriteField(shuttle, "command_destructors", false)
-	FD.WriteField(shuttle, "command_queue", nil)
-	FD.WriteField(shuttle, "forced_cmd_importance", nil)
-
-	for _, thread in ipairs({
-		FD.ReadField(shuttle, "command_thread"),
-		FD.ReadField(shuttle, "thread_running_destructors"),
-	}) do
-		if FD.SafeCall(FD.Global("IsValidThread"), thread) then
-			FD.SafeCall(FD.Global("DeleteThread"), thread)
-		end
-	end
-
-	FD.WriteField(shuttle, "command_thread", nil)
-	FD.WriteField(shuttle, "thread_running_destructors", nil)
-	FD.WriteField(shuttle, "command", "Idle")
-end
-
 -- Free one shuttle landing reservation from a valid landing container.
 local function FreeLandingSpot(container, shuttle)
 	if FD.IsObjectValid(container) then
@@ -151,7 +131,7 @@ function Shuttle.IdleForRelatedObjectDelete(shuttle)
 		return false
 	end
 
-	StopCommandNoDestructors(shuttle)
+	FD.StopCommandNoDestructors(shuttle)
 	PrepareForRelatedObjectDelete(shuttle)
 	return true
 end

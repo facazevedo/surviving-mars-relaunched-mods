@@ -29,6 +29,7 @@ FD.Config.NON_DEMOLISHABLE_OBJECT_LEVEL = 2
 FD.Config.FORCE_DELETE_LEVELS = {
 	dome = 2,
 	deposit = 2,
+	rover = 2,
 }
 
 -- ============================================================================

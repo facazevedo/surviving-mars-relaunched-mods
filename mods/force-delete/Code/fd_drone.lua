@@ -63,26 +63,6 @@ local delete_request_fields = {
 	"resource_request",
 }
 
--- Stop a drone command without letting stale destructors touch deleted objects.
-local function StopCommandNoDestructors(drone)
-	FD.WriteField(drone, "command_destructors", false)
-	FD.WriteField(drone, "command_queue", nil)
-	FD.WriteField(drone, "forced_cmd_importance", nil)
-
-	for _, thread in ipairs({
-		FD.ReadField(drone, "command_thread"),
-		FD.ReadField(drone, "thread_running_destructors"),
-	}) do
-		if FD.SafeCall(FD.Global("IsValidThread"), thread) then
-			FD.SafeCall(FD.Global("DeleteThread"), thread)
-		end
-	end
-
-	FD.WriteField(drone, "command_thread", nil)
-	FD.WriteField(drone, "thread_running_destructors", nil)
-	FD.WriteField(drone, "command", "Idle")
-end
-
 -- Clear target and request state before related objects are deleted.
 local function PrepareForRelatedObjectDelete(drone)
 	for _, field in ipairs(delete_target_fields) do
@@ -135,7 +115,7 @@ function Drone.IdleForRelatedObjectDelete(drone)
 		or FD.CallObjectMethod(drone, "SetCommand", "Reset")
 
 	if not commanded then
-		StopCommandNoDestructors(drone)
+		FD.StopCommandNoDestructors(drone)
 	end
 
 	PrepareForRelatedObjectDelete(drone)

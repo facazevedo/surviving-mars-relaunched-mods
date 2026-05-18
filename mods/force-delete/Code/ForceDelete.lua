@@ -23,8 +23,10 @@ FD.SUPPORTED_TYPES = {
 	{ object_type = "drone", module_name = "Drone", is_method = "IsDrone" },
 	{ object_type = "animal", module_name = "Animal", is_method = "IsAnimal" },
 	{ object_type = "shuttle", module_name = "Shuttle", is_method = "IsShuttle" },
+	{ object_type = "rover", module_name = "Rover", is_method = "IsRover" },
 	{ object_type = "dome", module_name = "Dome", is_method = "IsDome" },
 	{ object_type = "deposit", module_name = "Deposit", is_method = "IsDeposit" },
+	{ object_type = "decoration", module_name = "Decoration", is_method = "IsDecoration" },
 	{ object_type = "infrastructure", module_name = "Infrastructure", is_method = "IsInfrastructure" },
 	{ object_type = "internal_building", module_name = "InternalBuilding", is_method = "IsInternalBuilding" },
 	{ object_type = "external_building", module_name = "ExternalBuilding", is_method = "IsExternalBuilding" },
@@ -237,6 +239,7 @@ function FD.IsProtectedUnit(obj)
 		or (FD.Drone and FD.Drone.IsDrone(obj))
 		or (FD.Animal and FD.Animal.IsAnimal(obj))
 		or (FD.Shuttle and FD.Shuttle.IsShuttle(obj))
+		or (FD.Rover and FD.Rover.IsRover(obj))
 end
 
 -- Return whether an object is a dome-like building that needs separate logic later.
@@ -292,6 +295,26 @@ function FD.CallObjectMethod(obj, method, ...)
 
 	local ok = pcall(fn, obj, ...)
 	return ok and true or false
+end
+
+-- Stop a command object without letting stale command destructors run.
+function FD.StopCommandNoDestructors(obj)
+	FD.WriteField(obj, "command_destructors", false)
+	FD.WriteField(obj, "command_queue", nil)
+	FD.WriteField(obj, "forced_cmd_importance", nil)
+
+	for _, thread in ipairs({
+		FD.ReadField(obj, "command_thread"),
+		FD.ReadField(obj, "thread_running_destructors"),
+	}) do
+		if FD.SafeCall(FD.Global("IsValidThread"), thread) then
+			FD.SafeCall(FD.Global("DeleteThread"), thread)
+		end
+	end
+
+	FD.WriteField(obj, "command_thread", nil)
+	FD.WriteField(obj, "thread_running_destructors", nil)
+	FD.WriteField(obj, "command", "Idle")
 end
 
 -- Stop an active demolition countdown thread before forcing demolition now.
