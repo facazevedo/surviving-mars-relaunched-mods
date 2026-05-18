@@ -244,6 +244,38 @@ function Dome.CollectInspectorPassages(dome)
 	return CollectConnectedPassages(dome, false)
 end
 
+-- Return the number of passage controllers connected to one dome.
+function Dome.CountConnectedPassages(dome)
+	local connected_passages = FD.ReadField(dome, "connected_passages")
+	local seen = {}
+	local count = 0
+
+	local function count_passage(passage)
+		if FD.IsObjectValid(passage)
+			and not seen[passage]
+			and HasPassageClassName(passage)
+			and type(FD.ReadField(passage, "elements")) == "table"
+		then
+			seen[passage] = true
+			count = count + 1
+		end
+	end
+
+	if type(connected_passages) == "table" then
+		for passage in pairs(connected_passages) do
+			count_passage(passage)
+		end
+
+		return count
+	end
+
+	for _, obj in ipairs(Dome.CollectInspectorPassages(dome)) do
+		count_passage(FD.ReadField(obj, "passage_obj") or obj)
+	end
+
+	return count
+end
+
 -- Return ids for a collection of passage objects.
 function Dome.PassageIds(passages)
 	local ids = {}
@@ -397,8 +429,8 @@ function Dome.GetRelevantAttributes(dome)
 	local internal_buildings = Dome.CollectInspectorInternalBuildings(dome)
 
 	FD.AddCommonObjectAttributes(rows, dome, "dome", "dome deletion is staged")
+	table.insert(rows, 2, { "num_passages", FD.AttributeText(Dome.CountConnectedPassages(dome)) })
 	FD.AddAttribute(rows, "inspector_scan", "local only; full scan runs on delete")
-	FD.AddAttribute(rows, "local_passage_count", #passages)
 	FD.AddAttribute(rows, "local_passage_ids", Dome.PassageIds(passages))
 	FD.AddAttribute(rows, "local_internal_building_count", #internal_buildings)
 	FD.AddFieldAttributes(rows, dome, FD.IDENTITY_FIELDS)
