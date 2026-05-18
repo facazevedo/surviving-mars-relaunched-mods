@@ -276,6 +276,43 @@ function Dome.CountConnectedPassages(dome)
 	return count
 end
 
+-- Return whether an object is the main passage controller, not a passage piece.
+function Dome.IsPassageController(obj)
+	return FD.IsObjectValid(obj)
+		and HasPassageClassName(obj)
+		and type(FD.ReadField(obj, "elements")) == "table"
+end
+
+-- Return the main passage controller for a passage object or passage piece.
+function Dome.PassageControllerFor(obj)
+	if Dome.IsPassageController(obj) then
+		return obj
+	end
+
+	local passage_obj = FD.ReadField(obj, "passage_obj")
+	if Dome.IsPassageController(passage_obj) then
+		return passage_obj
+	end
+
+	return false
+end
+
+-- Return only connected passage controllers from the dome connection table.
+function Dome.CollectConnectedPassageControllers(dome)
+	local connected_passages = FD.ReadField(dome, "connected_passages")
+	local passages = {}
+	local seen = {}
+
+	if type(connected_passages) == "table" then
+		for key, value in pairs(connected_passages) do
+			AddUnique(passages, seen, Dome.PassageControllerFor(key))
+			AddUnique(passages, seen, Dome.PassageControllerFor(value))
+		end
+	end
+
+	return passages
+end
+
 -- Return ids for a collection of passage objects.
 function Dome.PassageIds(passages)
 	local ids = {}
@@ -356,6 +393,42 @@ function Dome.DeleteObjects(objects)
 	return deleted
 end
 
+-- Demolish one passage and direct-delete it only if demolition left it valid.
+function Dome.DeletePassageSequentially(passage)
+	if not Dome.IsPassageController(passage) then
+		return false, false
+	end
+
+	local demolished = FD.Level1DemolishObject(passage)
+	local deleted = false
+
+	if FD.IsObjectValid(passage) then
+		deleted = FD.Level2DeleteObject(passage)
+	end
+
+	return demolished, deleted
+end
+
+-- Demolish and then delete each connected passage before moving to the next.
+function Dome.DeletePassagesSequentially(passages)
+	local demolished = 0
+	local deleted = 0
+
+	for _, passage in ipairs(passages or {}) do
+		local did_demolish, did_delete = Dome.DeletePassageSequentially(passage)
+
+		if did_demolish then
+			demolished = demolished + 1
+		end
+
+		if did_delete then
+			deleted = deleted + 1
+		end
+	end
+
+	return demolished, deleted
+end
+
 -- Detect dome objects.
 function Dome.IsDome(obj)
 	if not FD.IsObjectValid(obj) then
@@ -381,7 +454,7 @@ function Dome.OnSelected(obj)
 	end
 end
 
--- Delete a dome through the requested staged order.
+-- Delete a dome by staging passages, internal buildings, and the dome itself.
 function Dome.Delete(dome)
 	if not Dome.IsDome(dome) then
 		FD.ShowDeleteMessage("Ctrl+Shift+Delete pressed.\n\nSelected object is not a dome.")
@@ -389,10 +462,10 @@ function Dome.Delete(dome)
 	end
 
 	local summary = FD.ObjectSummary(dome)
-	local passages = Dome.CollectConnectedPassages(dome)
+	local passages = Dome.CollectConnectedPassageControllers(dome)
 	local passage_ids = Dome.PassageIds(passages)
-	local passage_demolished = Dome.DemolishObjects(passages)
-	local passage_deleted = Dome.DeleteObjects(passages)
+	local passage_demolished, passage_deleted = Dome.DeletePassagesSequentially(passages)
+	local passages_remaining = Dome.CountConnectedPassages(dome)
 	local internal_buildings = Dome.CollectInternalBuildings(dome)
 	local internal_demolished = Dome.DemolishObjects(internal_buildings)
 	local internal_deleted = Dome.DeleteObjects(internal_buildings)
@@ -407,8 +480,10 @@ function Dome.Delete(dome)
 			.. (passage_ids ~= "" and passage_ids or "none")
 			.. "\nPassages demolished: "
 			.. FD.SafeToString(passage_demolished)
-			.. "\nPassages deleted: "
+			.. "\nPassages direct-deleted: "
 			.. FD.SafeToString(passage_deleted)
+			.. "\nPassages remaining: "
+			.. FD.SafeToString(passages_remaining)
 			.. "\nInternal buildings demolished: "
 			.. FD.SafeToString(internal_demolished)
 			.. "\nInternal buildings deleted: "
@@ -419,7 +494,12 @@ function Dome.Delete(dome)
 			.. FD.SafeToString(dome_deleted)
 	)
 
-	return dome_deleted > 0 or dome_demolished > 0
+	return dome_deleted > 0
+		or dome_demolished > 0
+		or internal_deleted > 0
+		or internal_demolished > 0
+		or passage_deleted > 0
+		or passage_demolished > 0
 end
 
 -- Return dome diagnostic attributes.
