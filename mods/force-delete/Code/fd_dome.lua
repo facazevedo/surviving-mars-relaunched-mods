@@ -89,6 +89,25 @@ local drone_request_fields = {
 	"resource_request",
 }
 
+-- Fields that can keep shuttles targeting a soon-deleted dome object.
+local shuttle_reference_fields = {
+	"holder",
+	"target",
+	"goto_target",
+	"destination",
+	"dest_dome",
+	"hub",
+	"shuttle_hub",
+}
+
+-- Transport task fields that can point shuttles at deleted domes.
+local shuttle_task_reference_fields = {
+	"source_dome",
+	"dest_dome",
+	"colonist",
+	"dest_pos",
+}
+
 -- Methods used to silence engine light objects before direct deletion.
 local light_intensity_methods = {
 	"SetIntensity",
@@ -705,13 +724,6 @@ function Dome.CollectAffectedObjects(dome, passages, internal_buildings, matches
 	return objects
 end
 
--- Add affected colonists from one container's label tables.
-function Dome.CollectAffectedColonistsFromContainer(container, dome, targets, colonists, seen)
-	Dome.CollectAffectedObjectsFromContainer(container, function(obj)
-		return Dome.ColonistTargetsDomeDelete(obj, dome, targets)
-	end, colonists, seen)
-end
-
 -- Return colonists whose current command or assignment points at doomed objects.
 function Dome.CollectAffectedColonists(dome, passages, internal_buildings)
 	return Dome.CollectAffectedObjects(
@@ -732,27 +744,37 @@ function Dome.IdleAffectedColonists(dome, passages, internal_buildings)
 	)
 end
 
--- Return the source object behind a drone request, when available.
-function Dome.DroneRequestSource(request, drone)
+-- Return the source object behind a request, when available.
+function Dome.RequestSource(request, unit)
 	local get_source = FD.ReadField(request, "GetSource")
 	if type(get_source) ~= "function" then
 		return false
 	end
 
 	local ok, source = pcall(function()
-		return get_source(request, drone)
+		return get_source(request, unit)
 	end)
 
 	return ok and source or false
 end
 
--- Return whether one drone request points at a doomed dome object.
-function Dome.DroneRequestTargetsDomeDelete(drone, request, dome, targets)
+-- Preserve the older drone-specific request source helper name.
+function Dome.DroneRequestSource(request, drone)
+	return Dome.RequestSource(request, drone)
+end
+
+-- Return whether one task/request points at a doomed dome object.
+function Dome.RequestTargetsDomeDelete(unit, request, dome, targets)
 	if Dome.ValueTargetsDomeDelete(request, dome, targets) then
 		return true
 	end
 
-	return Dome.ValueTargetsDomeDelete(Dome.DroneRequestSource(request, drone), dome, targets)
+	return Dome.ValueTargetsDomeDelete(Dome.RequestSource(request, unit), dome, targets)
+end
+
+-- Preserve the older drone-specific helper name for compatibility.
+function Dome.DroneRequestTargetsDomeDelete(drone, request, dome, targets)
+	return Dome.RequestTargetsDomeDelete(drone, request, dome, targets)
 end
 
 -- Return whether a drone is currently tied to the dome deletion target set.
@@ -766,19 +788,12 @@ function Dome.DroneTargetsDomeDelete(drone, dome, targets)
 	end
 
 	for _, field in ipairs(drone_request_fields) do
-		if Dome.DroneRequestTargetsDomeDelete(drone, FD.ReadField(drone, field), dome, targets) then
+		if Dome.RequestTargetsDomeDelete(drone, FD.ReadField(drone, field), dome, targets) then
 			return true
 		end
 	end
 
 	return false
-end
-
--- Add affected drones from one container's label tables.
-function Dome.CollectAffectedDronesFromContainer(container, dome, targets, drones, seen)
-	Dome.CollectAffectedObjectsFromContainer(container, function(obj)
-		return Dome.DroneTargetsDomeDelete(obj, dome, targets)
-	end, drones, seen)
 end
 
 -- Return drones whose current command or request points at doomed objects.
@@ -797,6 +812,65 @@ function Dome.IdleAffectedDrones(dome, passages, internal_buildings)
 		Dome.CollectAffectedDrones(dome, passages, internal_buildings),
 		function(drone)
 			return FD.Drone and FD.Drone.IdleForRelatedObjectDelete(drone)
+		end
+	)
+end
+
+-- Return whether one shuttle transport task points at a doomed dome object.
+function Dome.ShuttleTaskTargetsDomeDelete(shuttle, task, dome, targets)
+	if type(task) ~= "table" and type(task) ~= "userdata" then
+		return false
+	end
+
+	for _, field in ipairs(shuttle_task_reference_fields) do
+		if Dome.ValueTargetsDomeDelete(FD.ReadField(task, field), dome, targets) then
+			return true
+		end
+	end
+
+	for _, index in ipairs({ 2, 3 }) do
+		if Dome.RequestTargetsDomeDelete(shuttle, FD.ReadField(task, index), dome, targets) then
+			return true
+		end
+	end
+
+	return false
+end
+
+-- Return whether a shuttle is currently tied to the dome deletion target set.
+function Dome.ShuttleTargetsDomeDelete(shuttle, dome, targets)
+	if not FD.Shuttle or not FD.Shuttle.IsShuttle(shuttle) then
+		return false
+	end
+
+	if Dome.FieldsTargetDomeDelete(shuttle, shuttle_reference_fields, dome, targets) then
+		return true
+	end
+
+	return Dome.ShuttleTaskTargetsDomeDelete(
+		shuttle,
+		FD.ReadField(shuttle, "transport_task"),
+		dome,
+		targets
+	)
+end
+
+-- Return shuttles whose current transport task points at doomed objects.
+function Dome.CollectAffectedShuttles(dome, passages, internal_buildings)
+	return Dome.CollectAffectedObjects(
+		dome,
+		passages,
+		internal_buildings,
+		Dome.ShuttleTargetsDomeDelete
+	)
+end
+
+-- Detach and idle shuttles before deleting the objects they target.
+function Dome.IdleAffectedShuttles(dome, passages, internal_buildings)
+	return CountSuccessfulActions(
+		Dome.CollectAffectedShuttles(dome, passages, internal_buildings),
+		function(shuttle)
+			return FD.Shuttle and FD.Shuttle.IdleForRelatedObjectDelete(shuttle)
 		end
 	)
 end
@@ -858,6 +932,8 @@ local function DomeDeletionMessage(result)
 		.. FD.SafeToString(result.idled_colonists)
 		.. "\nDrones idled: "
 		.. FD.SafeToString(result.idled_drones)
+		.. "\nShuttles idled: "
+		.. FD.SafeToString(result.idled_shuttles)
 		.. "\nDome lights destroyed: "
 		.. FD.SafeToString(result.lights_destroyed)
 		.. "\nPassages demolished: "
@@ -925,6 +1001,7 @@ function Dome.Delete(dome)
 	local lights_destroyed = Dome.DisableDomeLights(dome, internal_buildings)
 	local idled_colonists = Dome.IdleAffectedColonists(dome, passages, internal_buildings)
 	local idled_drones = Dome.IdleAffectedDrones(dome, passages, internal_buildings)
+	local idled_shuttles = Dome.IdleAffectedShuttles(dome, passages, internal_buildings)
 	local passage_demolished, passage_deleted = Dome.DeletePassagesSequentially(passages)
 	local passages_remaining = Dome.CountConnectedPassages(dome)
 	local internal_demolished = Dome.DemolishObjects(internal_buildings)
@@ -937,6 +1014,7 @@ function Dome.Delete(dome)
 		passage_ids = passage_ids,
 		idled_colonists = idled_colonists,
 		idled_drones = idled_drones,
+		idled_shuttles = idled_shuttles,
 		lights_destroyed = lights_destroyed,
 		passage_demolished = passage_demolished,
 		passage_deleted = passage_deleted,

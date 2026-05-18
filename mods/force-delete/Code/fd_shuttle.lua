@@ -43,6 +43,91 @@ local state_fields = {
 -- Method availability tells us which safe delete paths exist on this object.
 local methods = { "SetCommand", "ClearPath", "delete" }
 
+-- Fields that can keep a shuttle command pointing at soon-deleted objects.
+local related_delete_fields = {
+	"holder",
+	"target",
+	"goto_target",
+	"destination",
+	"transport_task",
+	"transport_request",
+	"request",
+	"resource_request",
+	"dest_dome",
+}
+
+-- Stop a shuttle command without running stale command destructors.
+local function StopCommandNoDestructors(shuttle)
+	FD.WriteField(shuttle, "command_destructors", false)
+	FD.WriteField(shuttle, "command_queue", nil)
+	FD.WriteField(shuttle, "forced_cmd_importance", nil)
+
+	for _, thread in ipairs({
+		FD.ReadField(shuttle, "command_thread"),
+		FD.ReadField(shuttle, "thread_running_destructors"),
+	}) do
+		if FD.SafeCall(FD.Global("IsValidThread"), thread) then
+			FD.SafeCall(FD.Global("DeleteThread"), thread)
+		end
+	end
+
+	FD.WriteField(shuttle, "command_thread", nil)
+	FD.WriteField(shuttle, "thread_running_destructors", nil)
+	FD.WriteField(shuttle, "command", "Idle")
+end
+
+-- Free one shuttle landing reservation from a valid landing container.
+local function FreeLandingSpot(container, shuttle)
+	if FD.IsObjectValid(container) then
+		FD.CallObjectMethod(container, "FreeLandingSpot", shuttle)
+	end
+end
+
+-- Clear a colonist transport task without letting it resume after deletion.
+local function ClearColonistTransportTask(shuttle, task)
+	local colonist = FD.ReadField(task, "colonist")
+
+	FreeLandingSpot(FD.ReadField(task, "source_dome"), shuttle)
+	FreeLandingSpot(FD.ReadField(task, "dest_dome"), shuttle)
+
+	if FD.IsObjectValid(colonist) and FD.ReadField(colonist, "transport_task") == task then
+		FD.WriteField(colonist, "transport_task", false)
+	end
+
+	if FD.ReadField(task, "shuttle") == shuttle then
+		FD.WriteField(task, "shuttle", false)
+	end
+
+	FD.CallObjectMethod(task, "Cleanup")
+end
+
+-- Clear shuttle transport state before related objects are deleted.
+local function PrepareForRelatedObjectDelete(shuttle)
+	local task = FD.ReadField(shuttle, "transport_task")
+
+	FD.CallObjectMethod(shuttle, "LandingEnd")
+	FD.CallObjectMethod(shuttle, "WaitingEnd")
+	FD.CallObjectMethod(shuttle, "ClearPath")
+	FD.CallObjectMethod(shuttle, "ClearRequests")
+
+	if type(task) == "table" or type(task) == "userdata" then
+		ClearColonistTransportTask(shuttle, task)
+	end
+
+	FreeLandingSpot(FD.ReadField(shuttle, "dest_dome"), shuttle)
+
+	for _, field in ipairs(related_delete_fields) do
+		FD.WriteField(shuttle, field, false)
+	end
+
+	FD.WriteField(shuttle, "assigned_to_d_req", false)
+	FD.WriteField(shuttle, "assigned_to_s_req", false)
+	FD.WriteField(shuttle, "is_colonist_transport_task", false)
+	FD.WriteField(shuttle, "history_entry", false)
+	FD.WriteField(shuttle, "landing", false)
+	FD.WriteField(shuttle, "waiting", false)
+end
+
 -- Detect mobile shuttles while excluding shuttle hubs and buildings.
 function Shuttle.IsShuttle(obj)
 	if not FD.IsObjectValid(obj) then
@@ -58,6 +143,17 @@ function Shuttle.IsShuttle(obj)
 
 	return FD.IsKindOf(obj, "Shuttle")
 		or class:find("Shuttle", 1, true) ~= nil
+end
+
+-- Detach a shuttle from doomed objects and stop its current route.
+function Shuttle.IdleForRelatedObjectDelete(shuttle)
+	if not Shuttle.IsShuttle(shuttle) then
+		return false
+	end
+
+	StopCommandNoDestructors(shuttle)
+	PrepareForRelatedObjectDelete(shuttle)
+	return true
 end
 
 -- Show shuttle diagnostics for the selected object.
