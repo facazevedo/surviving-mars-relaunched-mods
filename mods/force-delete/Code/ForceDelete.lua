@@ -743,20 +743,22 @@ function FD.RunForceDeleteLevel(requested_level, shortcut_message)
 	-- Build the complete batch before clearing selection.
 	for _, obj in ipairs(selected_objects) do
 		local object_type = FD.ObjectType(obj)
-		local object_level = FD.ConfiguredLevelForType(object_type, obj)
-		local can_delete = object_type
-			and object_level
-			and FD.CanDeleteAtLevel(object_type, requested_level, obj)
 
-		if can_delete then
-			delete_plan[#delete_plan + 1] = {
-				obj = obj,
-				object_type = object_type,
-			}
-		elseif not object_type or not object_level then
+		if not object_type then
 			skipped_unsupported = skipped_unsupported + 1
 		else
-			skipped_level = skipped_level + 1
+			local object_level = FD.ConfiguredLevelForType(object_type, obj)
+
+			if object_level and FD.CanDeleteAtLevel(object_type, requested_level, obj) then
+				delete_plan[#delete_plan + 1] = {
+					obj = obj,
+					object_type = object_type,
+				}
+			elseif object_level then
+				skipped_level = skipped_level + 1
+			else
+				skipped_unsupported = skipped_unsupported + 1
+			end
 		end
 	end
 

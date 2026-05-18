@@ -702,13 +702,7 @@ function Dome.ColonistTransportTicketTargetsDomeDelete(ticket, dome, targets)
 		return false
 	end
 
-	for _, field in ipairs(colonist_transport_ticket_fields) do
-		if Dome.ValueTargetsDomeDelete(FD.ReadField(ticket, field), dome, targets) then
-			return true
-		end
-	end
-
-	return false
+	return Dome.FieldsTargetDomeDelete(ticket, colonist_transport_ticket_fields, dome, targets)
 end
 
 -- Return whether a colonist shuttle task points at doomed dome objects.
@@ -717,13 +711,7 @@ function Dome.ColonistTransportTaskTargetsDomeDelete(task, dome, targets)
 		return false
 	end
 
-	for _, field in ipairs(colonist_transport_task_fields) do
-		if Dome.ValueTargetsDomeDelete(FD.ReadField(task, field), dome, targets) then
-			return true
-		end
-	end
-
-	return false
+	return Dome.FieldsTargetDomeDelete(task, colonist_transport_task_fields, dome, targets)
 end
 
 -- Return whether a colonist command may hold hidden dome/passage arguments.
@@ -775,12 +763,12 @@ function Dome.CollectAffectedObjectsFromContainer(container, matches, objects, s
 end
 
 -- Return affected objects found in the dome and city/colony label tables.
-function Dome.CollectAffectedObjects(dome, passages, internal_buildings, matches)
+function Dome.CollectAffectedObjects(dome, passages, internal_buildings, matches, targets)
 	if type(matches) ~= "function" then
 		return {}
 	end
 
-	local targets = Dome.BuildDeletionTargetSet(dome, passages, internal_buildings)
+	targets = targets or Dome.BuildDeletionTargetSet(dome, passages, internal_buildings)
 	local objects = {}
 	local seen = {}
 	local seen_containers = {}
@@ -801,19 +789,20 @@ function Dome.CollectAffectedObjects(dome, passages, internal_buildings, matches
 end
 
 -- Return colonists whose current command or assignment points at doomed objects.
-function Dome.CollectAffectedColonists(dome, passages, internal_buildings)
+function Dome.CollectAffectedColonists(dome, passages, internal_buildings, targets)
 	return Dome.CollectAffectedObjects(
 		dome,
 		passages,
 		internal_buildings,
-		Dome.ColonistTargetsDomeDelete
+		Dome.ColonistTargetsDomeDelete,
+		targets
 	)
 end
 
 -- Detach and idle colonists before deleting the objects they target.
-function Dome.IdleAffectedColonists(dome, passages, internal_buildings)
+function Dome.IdleAffectedColonists(dome, passages, internal_buildings, targets)
 	return CountSuccessfulActions(
-		Dome.CollectAffectedColonists(dome, passages, internal_buildings),
+		Dome.CollectAffectedColonists(dome, passages, internal_buildings, targets),
 		function(colonist)
 			return FD.Colonist and FD.Colonist.IdleForRelatedObjectDelete(colonist)
 		end
@@ -873,19 +862,20 @@ function Dome.DroneTargetsDomeDelete(drone, dome, targets)
 end
 
 -- Return drones whose current command or request points at doomed objects.
-function Dome.CollectAffectedDrones(dome, passages, internal_buildings)
+function Dome.CollectAffectedDrones(dome, passages, internal_buildings, targets)
 	return Dome.CollectAffectedObjects(
 		dome,
 		passages,
 		internal_buildings,
-		Dome.DroneTargetsDomeDelete
+		Dome.DroneTargetsDomeDelete,
+		targets
 	)
 end
 
 -- Detach and idle drones before deleting the objects they target.
-function Dome.IdleAffectedDrones(dome, passages, internal_buildings)
+function Dome.IdleAffectedDrones(dome, passages, internal_buildings, targets)
 	return CountSuccessfulActions(
-		Dome.CollectAffectedDrones(dome, passages, internal_buildings),
+		Dome.CollectAffectedDrones(dome, passages, internal_buildings, targets),
 		function(drone)
 			return FD.Drone and FD.Drone.IdleForRelatedObjectDelete(drone)
 		end
@@ -898,10 +888,8 @@ function Dome.ShuttleTaskTargetsDomeDelete(shuttle, task, dome, targets)
 		return false
 	end
 
-	for _, field in ipairs(shuttle_task_reference_fields) do
-		if Dome.ValueTargetsDomeDelete(FD.ReadField(task, field), dome, targets) then
-			return true
-		end
+	if Dome.FieldsTargetDomeDelete(task, shuttle_task_reference_fields, dome, targets) then
+		return true
 	end
 
 	for _, index in ipairs({ 2, 3 }) do
@@ -932,19 +920,20 @@ function Dome.ShuttleTargetsDomeDelete(shuttle, dome, targets)
 end
 
 -- Return shuttles whose current transport task points at doomed objects.
-function Dome.CollectAffectedShuttles(dome, passages, internal_buildings)
+function Dome.CollectAffectedShuttles(dome, passages, internal_buildings, targets)
 	return Dome.CollectAffectedObjects(
 		dome,
 		passages,
 		internal_buildings,
-		Dome.ShuttleTargetsDomeDelete
+		Dome.ShuttleTargetsDomeDelete,
+		targets
 	)
 end
 
 -- Detach and idle shuttles before deleting the objects they target.
-function Dome.IdleAffectedShuttles(dome, passages, internal_buildings)
+function Dome.IdleAffectedShuttles(dome, passages, internal_buildings, targets)
 	return CountSuccessfulActions(
-		Dome.CollectAffectedShuttles(dome, passages, internal_buildings),
+		Dome.CollectAffectedShuttles(dome, passages, internal_buildings, targets),
 		function(shuttle)
 			return FD.Shuttle and FD.Shuttle.IdleForRelatedObjectDelete(shuttle)
 		end
@@ -1086,10 +1075,11 @@ function Dome.Delete(dome)
 	local passages = Dome.CollectConnectedPassageControllers(dome)
 	local passage_ids = Dome.PassageIds(passages)
 	local internal_buildings = Dome.CollectInternalBuildings(dome)
+	local targets = Dome.BuildDeletionTargetSet(dome, passages, internal_buildings)
 	local lights_destroyed = Dome.DisableDomeLights(dome, internal_buildings)
-	local idled_colonists = Dome.IdleAffectedColonists(dome, passages, internal_buildings)
-	local idled_drones = Dome.IdleAffectedDrones(dome, passages, internal_buildings)
-	local idled_shuttles = Dome.IdleAffectedShuttles(dome, passages, internal_buildings)
+	local idled_colonists = Dome.IdleAffectedColonists(dome, passages, internal_buildings, targets)
+	local idled_drones = Dome.IdleAffectedDrones(dome, passages, internal_buildings, targets)
+	local idled_shuttles = Dome.IdleAffectedShuttles(dome, passages, internal_buildings, targets)
 	local passage_demolished, passage_deleted = Dome.DeletePassagesSequentially(passages)
 	local passages_remaining = Dome.CountConnectedPassages(dome)
 	local internal_demolished = Dome.DemolishObjects(internal_buildings)
