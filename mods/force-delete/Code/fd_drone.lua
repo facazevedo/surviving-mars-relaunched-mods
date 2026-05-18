@@ -41,8 +41,8 @@ local state_fields = {
 -- Method availability tells us which safe delete paths exist on this object.
 local methods = { "SetCommand", "DieNow", "delete" }
 
--- Direct object fields that can keep a drone targeting an object about to be deleted.
-local delete_target_fields = {
+-- Object fields can safely use false as the engine's empty reference value.
+local object_reference_fields = {
 	"command_center",
 	"target",
 	"goto_target",
@@ -53,8 +53,8 @@ local delete_target_fields = {
 	"destination",
 }
 
--- Request fields must be nil, not false, because request destructors index them.
-local delete_request_fields = {
+-- Request fields use nil so delayed request cleanup never indexes booleans.
+local request_reference_fields = {
 	"d_request",
 	"s_request",
 	"w_request",
@@ -72,8 +72,8 @@ end
 
 -- Clear target and request state before related objects are deleted.
 local function PrepareForRelatedObjectDelete(drone)
-	ClearFields(drone, delete_target_fields, false)
-	ClearFields(drone, delete_request_fields, nil)
+	ClearFields(drone, object_reference_fields, false)
+	ClearFields(drone, request_reference_fields, nil)
 	FD.WriteField(drone, "resource", false)
 	FD.WriteField(drone, "amount", 0)
 end
@@ -130,19 +130,13 @@ function Drone.OnSelected(obj)
 	end
 end
 
--- Detach a drone from doomed objects and ask it to stop current work.
+-- Detach a drone from doomed objects without running stale request destructors.
 function Drone.IdleForRelatedObjectDelete(drone)
 	if not Drone.IsDrone(drone) then
 		return false
 	end
 
-	local commanded = FD.CallObjectMethod(drone, "SetCommand", "Idle")
-		or FD.CallObjectMethod(drone, "SetCommand", "Reset")
-
-	if not commanded then
-		FD.StopCommandNoDestructors(drone)
-	end
-
+	FD.StopCommandNoDestructors(drone)
 	PrepareForRelatedObjectDelete(drone)
 	return true
 end

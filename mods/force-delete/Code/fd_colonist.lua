@@ -62,8 +62,8 @@ local methods = {
 	"delete",
 }
 
--- Fields that can keep a colonist command destructor pointing at deleted objects.
-local related_delete_fields = {
+-- Movement and visit fields can safely use false as the engine's empty reference value.
+local movement_reference_fields = {
 	"target",
 	"goto_target",
 	"destination",
@@ -79,9 +79,6 @@ local related_delete_fields = {
 	"entering_tunnel",
 	"leaving_tunnel",
 	"fx_moving_target",
-	"transport_ticket",
-	"transport_task",
-	"work_route",
 	"lead_in_out",
 }
 
@@ -200,7 +197,7 @@ local function PrepareForRelatedObjectDelete(colonist)
 	ClearTransportTask(colonist)
 	PrepareForDelete(colonist)
 
-	for _, field in ipairs(related_delete_fields) do
+	for _, field in ipairs(movement_reference_fields) do
 		FD.WriteField(colonist, field, false)
 	end
 

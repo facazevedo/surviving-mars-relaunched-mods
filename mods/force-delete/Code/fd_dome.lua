@@ -980,6 +980,259 @@ function Dome.PruneDeletedDomeReferences(dome, passages, internal_buildings)
 	Dome.PruneDeleteReferencesFromTable(FD.ReadField(dome, "connected_passages"), delete_set)
 end
 
+-- Return rotated hex-shape coordinates without trusting engine point types.
+local function RotatedHexPoint(pt, dir)
+	local hex_rotate = FD.Global("HexRotate")
+	if type(hex_rotate) ~= "function" then
+		return false
+	end
+
+	local ok, q, r = pcall(function()
+		return hex_rotate(pt, dir)
+	end)
+	if not ok then
+		return false
+	end
+
+	if type(q) == "number" and type(r) == "number" then
+		return q, r
+	end
+
+	if q and type(FD.ReadField(q, "xy")) == "function" then
+		local xy_ok, x, y = pcall(function()
+			return q:xy()
+		end)
+
+		if xy_ok then
+			return x, y
+		end
+	end
+
+	return false
+end
+
+-- Clear one dome's supply connection bits after passages/internal buildings are gone.
+function Dome.ClearSupplyConnectionGrid(dome)
+	if not Dome.IsDome(dome) then
+		return false
+	end
+
+	local map = FD.CallMethod(dome, "GetMap")
+	local supply_connection_grid = FD.ReadField(map, "supply_connection_grid")
+	local world_to_hex = FD.Global("WorldToHex")
+	local hex_angle_to_direction = FD.Global("HexAngleToDirection")
+	local hex_grid_get = FD.Global("HexGridGet")
+	local hex_grid_set = FD.Global("HexGridSet")
+	local hex_get_direction = FD.Global("HexGetDirection")
+	local hex_neighbours = FD.Global("HexNeighbours")
+	local band_fn = FD.Global("band")
+	local bnot_fn = FD.Global("bnot")
+	local shift_fn = FD.Global("shift")
+
+	if not supply_connection_grid
+		or type(world_to_hex) ~= "function"
+		or type(hex_angle_to_direction) ~= "function"
+		or type(hex_grid_get) ~= "function"
+		or type(hex_grid_set) ~= "function"
+		or type(hex_get_direction) ~= "function"
+		or type(hex_neighbours) ~= "table"
+		or type(band_fn) ~= "function"
+		or type(bnot_fn) ~= "function"
+		or type(shift_fn) ~= "function"
+	then
+		return false
+	end
+
+	local ok_hex, dome_q, dome_r = pcall(function()
+		return world_to_hex(dome)
+	end)
+	local shape = nil
+	local ok_shape = pcall(function()
+		shape = dome:GetSupplyGridConnectionShapePoints("electricity")
+	end)
+
+	if not ok_hex or not ok_shape or type(shape) ~= "table" then
+		return false
+	end
+
+	local dir = hex_angle_to_direction(FD.CallMethod(dome, "GetAngle") or 0)
+
+	for _, pt in ipairs(shape) do
+		local pt_q, pt_r = RotatedHexPoint(pt, dir)
+
+		if type(pt_q) == "number" and type(pt_r) == "number" then
+			local q = dome_q + pt_q
+			local r = dome_r + pt_r
+
+			for _, resource in ipairs({ "electricity", "water" }) do
+				local grid = supply_connection_grid[resource]
+
+				if grid then
+					for _, neighbor in ipairs(hex_neighbours) do
+						local xy_ok, neighbor_q, neighbor_r = pcall(function()
+							return neighbor:xy()
+						end)
+
+						if xy_ok then
+							local n_q = q + neighbor_q
+							local n_r = r + neighbor_r
+							local value = hex_grid_get(grid, n_q, n_r)
+
+							if value and value ~= 0 then
+								local rev_dir = hex_get_direction(n_q, n_r, q, r)
+								local cleared = band_fn(value, bnot_fn(shift_fn(1, rev_dir)))
+
+								hex_grid_set(grid, n_q, n_r, cleared)
+							end
+						end
+					end
+
+					hex_grid_set(grid, q, r, 0)
+				end
+			end
+		end
+	end
+
+	return true
+end
+
+-- Return the configured hex size, with a safe fallback for terrain math.
+local function HexSize()
+	local const = FD.Global("const")
+
+	return const and const.HexSize or 1000
+end
+
+-- Return the best map object to use for dome terrain edits.
+local function DomeTerrainMap(dome)
+	return FD.CallMethod(dome, "GetMap")
+		or FD.Global("CurrentMap")
+		or FD.Global("MainMap")
+end
+
+-- Return an approximate radius for repainting a dome footprint.
+local function ObjectRadius(obj, fallback)
+	local radius = FD.CallMethod(obj, "GetRadius")
+
+	if type(radius) == "number" and radius > 0 then
+		return radius
+	end
+
+	local bbox = FD.CallMethod(obj, "GetEntityBBox")
+	if bbox then
+		local ok, size_x, size_y = pcall(function()
+			return bbox:sizex(), bbox:sizey()
+		end)
+
+		if ok and type(size_x) == "number" and type(size_y) == "number" then
+			return math.max(size_x, size_y) / 2
+		end
+	end
+
+	return fallback or 0
+end
+
+-- Return the terrain type at one position, or false if the engine call fails.
+local function TerrainTypeAt(map, pos, visual)
+	local terrain_api = FD.Global("terrain")
+	if not terrain_api or type(terrain_api.GetTerrainType) ~= "function" then
+		return false
+	end
+
+	local ok, terrain_type = pcall(function()
+		return terrain_api.GetTerrainType(map, pos, visual)
+	end)
+
+	return ok and terrain_type ~= nil and terrain_type or false
+end
+
+-- Return the most common terrain type just outside the dome footprint.
+local function SampleOuterTerrainType(dome)
+	local map = DomeTerrainMap(dome)
+	local point_fn = FD.Global("point")
+	local pos = FD.CallMethod(dome, "GetPos") or FD.ReadField(dome, "pos")
+
+	if not map or type(point_fn) ~= "function" or not pos then
+		return false
+	end
+
+	local hex_size = HexSize()
+	local sample_radius = ObjectRadius(dome, hex_size * 10) + hex_size * 3
+	local offsets = {
+		point_fn(sample_radius, 0, 0),
+		point_fn(-sample_radius, 0, 0),
+		point_fn(0, sample_radius, 0),
+		point_fn(0, -sample_radius, 0),
+		point_fn(sample_radius, sample_radius, 0),
+		point_fn(-sample_radius, sample_radius, 0),
+		point_fn(sample_radius, -sample_radius, 0),
+		point_fn(-sample_radius, -sample_radius, 0),
+	}
+	local counts = {}
+
+	for _, offset in ipairs(offsets) do
+		local ok, sample_pos = pcall(function()
+			return pos + offset
+		end)
+		local terrain_type = ok and TerrainTypeAt(map, sample_pos, true) or false
+
+		if terrain_type then
+			counts[terrain_type] = (counts[terrain_type] or 0) + 1
+		end
+	end
+
+	local best_type = false
+	local best_count = 0
+
+	for terrain_type, count in pairs(counts) do
+		if count > best_count then
+			best_type = terrain_type
+			best_count = count
+		end
+	end
+
+	return best_type
+end
+
+-- Repaint the dome footprint with the nearest surrounding terrain type.
+function Dome.ResetTerrain(dome)
+	if not Dome.IsDome(dome) then
+		return false
+	end
+
+	local terrain_api = FD.Global("terrain")
+	local map = DomeTerrainMap(dome)
+	local pos = FD.CallMethod(dome, "GetPos") or FD.ReadField(dome, "pos")
+
+	if not terrain_api
+		or not map
+		or not pos
+		or type(terrain_api.SetTypeCircle) ~= "function"
+	then
+		return false
+	end
+
+	local hex_size = HexSize()
+	local cleanup_radius = ObjectRadius(dome, hex_size * 10) + hex_size * 2
+	local terrain_type = SampleOuterTerrainType(dome)
+
+	if not terrain_type then
+		return false
+	end
+
+	local ok = pcall(function()
+		terrain_api.SetTypeCircle(map, pos, cleanup_radius, terrain_type, terrain_type)
+	end)
+
+	if ok and type(terrain_api.InvalidateType) == "function" then
+		pcall(function()
+			terrain_api.InvalidateType(map)
+		end)
+	end
+
+	return ok and true or false
+end
+
 -- Demolish one passage and run Level 2 only if demolition left it valid.
 function Dome.DeletePassageSequentially(passage)
 	if not Dome.IsPassageController(passage) then
@@ -1053,6 +1306,10 @@ local function DomeDeletionMessage(result)
 		.. FD.SafeToString(result.internal_demolished)
 		.. "\nInternal buildings deleted: "
 		.. FD.SafeToString(result.internal_deleted)
+		.. "\nDome grid cleaned: "
+		.. FD.SafeToString(result.grid_cleaned == true)
+		.. "\nDome terrain reset: "
+		.. FD.SafeToString(result.terrain_reset == true)
 		.. "\nDome demolished: "
 		.. FD.SafeToString(result.dome_demolished)
 		.. "\nDome deleted: "
@@ -1115,6 +1372,8 @@ function Dome.Delete(dome)
 	local internal_demolished = Dome.DemolishObjects(internal_buildings)
 	local internal_deleted = Dome.DeleteObjects(internal_buildings)
 	Dome.PruneDeletedDomeReferences(dome, passages, internal_buildings)
+	local grid_cleaned = Dome.ClearSupplyConnectionGrid(dome)
+	local terrain_reset = Dome.ResetTerrain(dome)
 	lights_destroyed = lights_destroyed + Dome.DisableDomeLights(dome)
 	local dome_demolished, dome_deleted = Dome.DeleteDomeShell(dome)
 	local result = {
@@ -1129,6 +1388,8 @@ function Dome.Delete(dome)
 		passages_remaining = passages_remaining,
 		internal_demolished = internal_demolished,
 		internal_deleted = internal_deleted,
+		grid_cleaned = grid_cleaned,
+		terrain_reset = terrain_reset,
 		dome_demolished = dome_demolished,
 		dome_deleted = dome_deleted,
 	}

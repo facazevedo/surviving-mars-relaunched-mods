@@ -43,16 +43,22 @@ local state_fields = {
 -- Method availability tells us which safe delete paths exist on this object.
 local methods = { "SetCommand", "ClearPath", "delete" }
 
--- Fields that can keep a shuttle command pointing at soon-deleted objects.
-local related_delete_fields = {
+-- Object fields can safely use false as the engine's empty reference value.
+local object_reference_fields = {
 	"holder",
 	"target",
 	"goto_target",
 	"destination",
+	"dest_dome",
+}
+
+-- Request fields use nil so delayed request cleanup never indexes booleans.
+local request_reference_fields = {
 	"transport_request",
 	"request",
 	"resource_request",
-	"dest_dome",
+	"assigned_to_d_req",
+	"assigned_to_s_req",
 }
 
 -- Free one shuttle landing reservation from a valid landing container.
@@ -112,15 +118,16 @@ local function PrepareForRelatedObjectDelete(shuttle)
 
 	FreeLandingSpot(FD.ReadField(shuttle, "dest_dome"), shuttle)
 
-	for _, field in ipairs(related_delete_fields) do
+	for _, field in ipairs(object_reference_fields) do
 		FD.WriteField(shuttle, field, false)
 	end
 
-	FD.WriteField(shuttle, "assigned_to_d_req", false)
-	FD.WriteField(shuttle, "assigned_to_s_req", false)
+	for _, field in ipairs(request_reference_fields) do
+		FD.WriteField(shuttle, field, nil)
+	end
 
 	if not keep_colonist_task then
-		FD.WriteField(shuttle, "transport_task", false)
+		FD.WriteField(shuttle, "transport_task", nil)
 		FD.WriteField(shuttle, "is_colonist_transport_task", false)
 	end
 
