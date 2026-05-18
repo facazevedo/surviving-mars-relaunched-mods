@@ -18,6 +18,7 @@ local state_fields = {
 	"labels",
 	"passages",
 	"connected_passages",
+	"cupola_interior_marker",
 	"demolishing",
 	"demolishing_countdown",
 	"demolishing_thread",
@@ -86,6 +87,20 @@ local drone_request_fields = {
 	"picked_up_from_req",
 	"request",
 	"resource_request",
+}
+
+-- Methods used to silence engine light objects before direct deletion.
+local light_intensity_methods = {
+	"SetIntensity",
+	"SetIntensity0",
+	"SetIntensity1",
+	"SetConstantIntensity",
+}
+
+-- Methods used to detach cluster-volume ids from dome component lights.
+local light_volume_methods = {
+	"SetVolumeId",
+	"SetTargetVolumeId",
 }
 
 -- Return whether a class name looks like a passage controller or element.
@@ -169,6 +184,113 @@ local function CountSuccessfulActions(objects, action)
 	end
 
 	return count
+end
+
+-- Return whether an object is a component light owned by dome visuals.
+local function IsComponentLight(obj)
+	return FD.IsObjectValid(obj)
+		and (
+			FD.IsKindOf(obj, "ComponentLight")
+			or FD.ClassName(obj):find("ComponentLight", 1, true) ~= nil
+		)
+end
+
+-- Disable night-light state on any object that supports the light API.
+function Dome.DisableNightLights(obj)
+	if not FD.IsObjectValid(obj) then
+		return
+	end
+
+	FD.CallObjectMethod(obj, "SetIsNightLightPossible", false, true)
+	FD.CallObjectMethod(obj, "SetIsNightLightPossible", false, false)
+	FD.CallObjectMethod(obj, "NightLightDisable", true)
+	FD.CallObjectMethod(obj, "NightLightDisable", false)
+	FD.CallObjectMethod(obj, "NightLightOffAttaches")
+	FD.CallObjectMethod(obj, "NightLightOffEmissive")
+	FD.CallObjectMethod(obj, "DestroyAttaches", "NightLightLight")
+	FD.CallObjectMethod(obj, "SetSIModulation", 0)
+end
+
+-- Collect component lights directly attached to one object.
+function Dome.CollectComponentLightsFrom(obj, lights, seen)
+	if not FD.IsObjectValid(obj) then
+		return
+	end
+
+	AddUnique(lights, seen, FD.ReadField(obj, "cupola_interior_marker"))
+
+	if type(FD.ReadField(obj, "ForEachAttach")) ~= "function" then
+		return
+	end
+
+	pcall(function()
+		obj:ForEachAttach("ComponentLight", function(attach)
+			AddUnique(lights, seen, attach)
+		end)
+	end)
+
+	pcall(function()
+		obj:ForEachAttach(function(attach)
+			if IsComponentLight(attach) then
+				AddUnique(lights, seen, attach)
+			end
+		end)
+	end)
+end
+
+-- Neutralize one clustered component light before destroying it.
+function Dome.DestroyComponentLight(light)
+	if not IsComponentLight(light) then
+		return false
+	end
+
+	local const = FD.Global("const")
+
+	if const and const.efVisible then
+		FD.CallObjectMethod(light, "ClearEnumFlags", const.efVisible)
+	end
+
+	for _, method in ipairs(light_intensity_methods) do
+		FD.CallObjectMethod(light, method, 0)
+	end
+
+	for _, method in ipairs(light_volume_methods) do
+		FD.CallObjectMethod(light, method, 0)
+	end
+
+	if const and const.eLightTypePoint then
+		FD.CallObjectMethod(light, "SetLightType", const.eLightTypePoint)
+	end
+
+	FD.CallObjectMethod(light, "DestroyRenderObj", true)
+	FD.CallObjectMethod(light, "DestroyRenderObj")
+
+	return FD.CallObjectMethod(light, "Destroy") or FD.Level2DeleteObject(light)
+end
+
+-- Disable and remove dome-owned lights before the dome leaves the map.
+function Dome.DisableDomeLights(dome, internal_buildings)
+	if not Dome.IsDome(dome) then
+		return 0
+	end
+
+	local lights = {}
+	local seen = {}
+
+	Dome.DisableNightLights(dome)
+	Dome.CollectComponentLightsFrom(dome, lights, seen)
+
+	for _, building in ipairs(internal_buildings or {}) do
+		Dome.DisableNightLights(building)
+		Dome.CollectComponentLightsFrom(building, lights, seen)
+	end
+
+	local destroyed = CountSuccessfulActions(lights, Dome.DestroyComponentLight)
+
+	FD.WriteField(dome, "cupola_interior_marker", false)
+	FD.CallObjectMethod(dome, "DestroyAttaches", "ComponentLight")
+
+	return destroyed
 end
 
 -- Return whether an object directly references a selected dome.
@@ -736,6 +858,8 @@ local function DomeDeletionMessage(result)
 		.. FD.SafeToString(result.idled_colonists)
 		.. "\nDrones idled: "
 		.. FD.SafeToString(result.idled_drones)
+		.. "\nDome lights destroyed: "
+		.. FD.SafeToString(result.lights_destroyed)
 		.. "\nPassages demolished: "
 		.. FD.SafeToString(result.passage_demolished)
 		.. "\nPassages direct-deleted: "
@@ -798,6 +922,7 @@ function Dome.Delete(dome)
 	local passages = Dome.CollectConnectedPassageControllers(dome)
 	local passage_ids = Dome.PassageIds(passages)
 	local internal_buildings = Dome.CollectInternalBuildings(dome)
+	local lights_destroyed = Dome.DisableDomeLights(dome, internal_buildings)
 	local idled_colonists = Dome.IdleAffectedColonists(dome, passages, internal_buildings)
 	local idled_drones = Dome.IdleAffectedDrones(dome, passages, internal_buildings)
 	local passage_demolished, passage_deleted = Dome.DeletePassagesSequentially(passages)
@@ -805,12 +930,14 @@ function Dome.Delete(dome)
 	local internal_demolished = Dome.DemolishObjects(internal_buildings)
 	local internal_deleted = Dome.DeleteObjects(internal_buildings)
 	local dome_demolished = FD.Level1DemolishObject(dome) and 1 or 0
+	lights_destroyed = lights_destroyed + Dome.DisableDomeLights(dome)
 	local dome_deleted = FD.Level2DeleteObject(dome) and 1 or 0
 	local result = {
 		summary = summary,
 		passage_ids = passage_ids,
 		idled_colonists = idled_colonists,
 		idled_drones = idled_drones,
+		lights_destroyed = lights_destroyed,
 		passage_demolished = passage_demolished,
 		passage_deleted = passage_deleted,
 		passages_remaining = passages_remaining,
