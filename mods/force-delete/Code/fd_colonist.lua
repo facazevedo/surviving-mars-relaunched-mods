@@ -61,6 +61,47 @@ local methods = {
 	"delete",
 }
 
+-- Fields that can keep a colonist command destructor pointing at deleted objects.
+local related_delete_fields = {
+	"target",
+	"goto_target",
+	"destination",
+	"holder",
+	"building",
+	"arriving",
+	"visit_end_time",
+	"visit_spot_end_time",
+	"path",
+	"passage",
+	"passage_obj",
+	"tunnel",
+	"entering_tunnel",
+	"leaving_tunnel",
+	"fx_moving_target",
+	"transport_ticket",
+	"work_route",
+	"lead_in_out",
+}
+
+-- Remove one object from an array/hash table without assuming an index.
+local function RemoveObjectFromTable(list, obj)
+	if type(list) ~= "table" or not obj then
+		return
+	end
+
+	for i = #list, 1, -1 do
+		if list[i] == obj then
+			table.remove(list, i)
+		end
+	end
+
+	for key, value in pairs(list) do
+		if key == obj or value == obj then
+			list[key] = nil
+		end
+	end
+end
+
 -- Append the dome owned by a related assignment object.
 local function AddRelatedDome(rows, colonist, field)
 	local related = FD.ReadField(colonist, field)
@@ -85,6 +126,97 @@ local function PrepareForDelete(colonist)
 	FD.CallObjectMethod(colonist, "ClearPath")
 end
 
+-- Return whether an object or point has a valid game position.
+local function HasValidPosition(value)
+	local is_valid_pos = FD.Global("IsValidPos")
+	if type(is_valid_pos) ~= "function" then
+		return value ~= nil
+	end
+
+	return FD.SafeCall(is_valid_pos, value) and true or false
+end
+
+-- Return a safe position from one related object.
+local function PositionFromObject(obj, colonist)
+	if not FD.IsObjectValid(obj) then
+		return false
+	end
+
+	local exit_pos = false
+	local get_exit = FD.ReadField(obj, "GetImmediateExitPos")
+	if type(get_exit) == "function" then
+		local ok, result = pcall(function()
+			return get_exit(obj, colonist)
+		end)
+		exit_pos = ok and result or false
+	end
+
+	local pos = exit_pos or FD.CallMethod(obj, "GetPos") or FD.CallMethod(obj, "GetVisualPos")
+	return HasValidPosition(pos) and pos or false
+end
+
+-- Place a colonist at a valid map position before clearing holder/building refs.
+local function EnsureValidPosition(colonist)
+	if HasValidPosition(colonist) then
+		return true
+	end
+
+	for _, field in ipairs({ "holder", "building", "dome", "residence", "workplace" }) do
+		local pos = PositionFromObject(FD.ReadField(colonist, field), colonist)
+		if pos and type(FD.ReadField(colonist, "SetPos")) == "function" then
+			FD.WriteField(colonist, "holder", false)
+			if FD.CallObjectMethod(colonist, "SetPos", pos) then
+				return HasValidPosition(colonist)
+			end
+		end
+	end
+
+	return false
+end
+
+-- Stop a colonist command without allowing stale command destructors to run.
+local function StopCommandNoDestructors(colonist)
+	FD.WriteField(colonist, "command_destructors", false)
+	FD.WriteField(colonist, "command_queue", nil)
+	FD.WriteField(colonist, "forced_cmd_importance", nil)
+
+	for _, thread in ipairs({
+		FD.ReadField(colonist, "command_thread"),
+		FD.ReadField(colonist, "thread_running_destructors"),
+	}) do
+		if FD.SafeCall(FD.Global("IsValidThread"), thread) then
+			FD.SafeCall(FD.Global("DeleteThread"), thread)
+		end
+	end
+
+	FD.WriteField(colonist, "command_thread", nil)
+	FD.WriteField(colonist, "thread_running_destructors", nil)
+	FD.WriteField(colonist, "command", "Idle")
+end
+
+-- Clear movement and visit state that may reference soon-deleted objects.
+local function PrepareForRelatedObjectDelete(colonist)
+	EnsureValidPosition(colonist)
+	PrepareForDelete(colonist)
+
+	for _, field in ipairs(related_delete_fields) do
+		FD.WriteField(colonist, field, false)
+	end
+
+	FD.WriteField(colonist, "lead_interrupted", true)
+	EnsureValidPosition(colonist)
+end
+
+-- Return whether two objects are safely on the same map.
+local function IsSameMapSafe(left, right)
+	local is_same_map = FD.Global("IsSameMap")
+	if type(is_same_map) ~= "function" then
+		return true
+	end
+
+	return FD.SafeCall(is_same_map, left, right) and true or false
+end
+
 -- Detect colonist/human objects and exclude common non-human classes.
 function Colonist.IsColonist(obj)
 	if not FD.IsObjectValid(obj) then
@@ -107,6 +239,34 @@ function Colonist.IsColonist(obj)
 		or class:find("Human", 1, true) ~= nil
 end
 
+-- Patch the engine's invalid train-exit branch to remove colonists by value.
+function Colonist.PatchExitVehicle()
+	if Colonist.exit_vehicle_patched then
+		return true
+	end
+
+	local colonist_class = FD.Global("Colonist")
+	local original = FD.ReadField(colonist_class, "ExitVehicle")
+	if type(original) ~= "function" then
+		return false
+	end
+
+	colonist_class.ExitVehicle = function(self, vehicle, ...)
+		local holder = FD.ReadField(self, "holder")
+
+		if not holder or holder ~= vehicle or not IsSameMapSafe(self, vehicle) then
+			RemoveObjectFromTable(FD.ReadField(vehicle, "units"), self)
+			FD.CallObjectMethod(self, "DiscardTransportTicket")
+			return false
+		end
+
+		return original(self, vehicle, ...)
+	end
+
+	Colonist.exit_vehicle_patched = true
+	return true
+end
+
 -- Show colonist diagnostics for the selected object.
 function Colonist.OnSelected(obj)
 	if FD.DisplayAttributes then
@@ -120,8 +280,9 @@ function Colonist.IdleForRelatedObjectDelete(colonist)
 		return false
 	end
 
-	PrepareForDelete(colonist)
-	return FD.CallObjectMethod(colonist, "SetCommand", "Idle")
+	PrepareForRelatedObjectDelete(colonist)
+	StopCommandNoDestructors(colonist)
+	return true
 end
 
 -- Delete a colonist through the safest available game path.
@@ -189,3 +350,8 @@ function Colonist.GetRelevantAttributes(colonist)
 		rows = rows,
 	}
 end
+
+-- Install the transport patch now and retry when game classes are finalized.
+FD.ChainOnMsg("ClassesPostprocess", "force_delete_colonist_exit_vehicle", Colonist.PatchExitVehicle)
+FD.ChainOnMsg("DataLoaded", "force_delete_colonist_exit_vehicle", Colonist.PatchExitVehicle)
+Colonist.PatchExitVehicle()
