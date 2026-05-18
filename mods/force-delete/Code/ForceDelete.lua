@@ -17,6 +17,18 @@ FD.IDENTITY_FIELDS = { "name", "display_name", "handle", "id", "index", "Index" 
 -- Common demolition methods shown by non-unit object modules.
 FD.DEMOLISHABLE_METHODS = { "CanDemolish", "DoDemolish", "delete" }
 
+-- Supported object modules are checked in this order for detection and dispatch.
+FD.SUPPORTED_TYPES = {
+	{ object_type = "colonist", module_name = "Colonist", is_method = "IsColonist" },
+	{ object_type = "drone", module_name = "Drone", is_method = "IsDrone" },
+	{ object_type = "animal", module_name = "Animal", is_method = "IsAnimal" },
+	{ object_type = "shuttle", module_name = "Shuttle", is_method = "IsShuttle" },
+	{ object_type = "dome", module_name = "Dome", is_method = "IsDome" },
+	{ object_type = "infrastructure", module_name = "Infrastructure", is_method = "IsInfrastructure" },
+	{ object_type = "internal_building", module_name = "InternalBuilding", is_method = "IsInternalBuilding" },
+	{ object_type = "external_building", module_name = "ExternalBuilding", is_method = "IsExternalBuilding" },
+}
+
 -- Return an optional engine global without creating it.
 function FD.Global(name)
 	return rawget(_G, name)
@@ -513,36 +525,13 @@ end
 
 -- Return the Force Delete object type handled by installed modules.
 function FD.ObjectType(obj)
-	if FD.Colonist and FD.Colonist.IsColonist(obj) then
-		return "colonist"
-	end
+	for _, entry in ipairs(FD.SUPPORTED_TYPES) do
+		local handler = FD[entry.module_name]
+		local detector = handler and handler[entry.is_method]
 
-	if FD.Drone and FD.Drone.IsDrone(obj) then
-		return "drone"
-	end
-
-	if FD.Animal and FD.Animal.IsAnimal(obj) then
-		return "animal"
-	end
-
-	if FD.Shuttle and FD.Shuttle.IsShuttle(obj) then
-		return "shuttle"
-	end
-
-	if FD.Dome and FD.Dome.IsDome(obj) then
-		return "dome"
-	end
-
-	if FD.Infrastructure and FD.Infrastructure.IsInfrastructure(obj) then
-		return "infrastructure"
-	end
-
-	if FD.InternalBuilding and FD.InternalBuilding.IsInternalBuilding(obj) then
-		return "internal_building"
-	end
-
-	if FD.ExternalBuilding and FD.ExternalBuilding.IsExternalBuilding(obj) then
-		return "external_building"
+		if type(detector) == "function" and detector(obj) then
+			return entry.object_type
+		end
 	end
 
 	return false
@@ -550,22 +539,10 @@ end
 
 -- Return the module that owns one supported object type.
 function FD.HandlerForType(object_type)
-	if object_type == "colonist" then
-		return FD.Colonist
-	elseif object_type == "drone" then
-		return FD.Drone
-	elseif object_type == "animal" then
-		return FD.Animal
-	elseif object_type == "shuttle" then
-		return FD.Shuttle
-	elseif object_type == "dome" then
-		return FD.Dome
-	elseif object_type == "infrastructure" then
-		return FD.Infrastructure
-	elseif object_type == "internal_building" then
-		return FD.InternalBuilding
-	elseif object_type == "external_building" then
-		return FD.ExternalBuilding
+	for _, entry in ipairs(FD.SUPPORTED_TYPES) do
+		if entry.object_type == object_type then
+			return FD[entry.module_name] or false
+		end
 	end
 
 	return false

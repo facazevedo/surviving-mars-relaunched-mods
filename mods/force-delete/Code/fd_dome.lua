@@ -725,6 +725,43 @@ function Dome.DeletePassagesSequentially(passages)
 	return demolished, deleted
 end
 
+-- Format the staged dome deletion result for the inspector panel.
+local function DomeDeletionMessage(result)
+	return "Ctrl+Shift+Delete pressed."
+		.. "\n\nDome: "
+		.. result.summary
+		.. "\nPassage ids: "
+		.. (result.passage_ids ~= "" and result.passage_ids or "none")
+		.. "\nColonists idled: "
+		.. FD.SafeToString(result.idled_colonists)
+		.. "\nDrones idled: "
+		.. FD.SafeToString(result.idled_drones)
+		.. "\nPassages demolished: "
+		.. FD.SafeToString(result.passage_demolished)
+		.. "\nPassages direct-deleted: "
+		.. FD.SafeToString(result.passage_deleted)
+		.. "\nPassages remaining: "
+		.. FD.SafeToString(result.passages_remaining)
+		.. "\nInternal buildings demolished: "
+		.. FD.SafeToString(result.internal_demolished)
+		.. "\nInternal buildings deleted: "
+		.. FD.SafeToString(result.internal_deleted)
+		.. "\nDome demolished: "
+		.. FD.SafeToString(result.dome_demolished)
+		.. "\nDome deleted: "
+		.. FD.SafeToString(result.dome_deleted)
+end
+
+-- Return whether any staged dome deletion step succeeded.
+local function DomeDeletionSucceeded(result)
+	return result.dome_deleted > 0
+		or result.dome_demolished > 0
+		or result.internal_deleted > 0
+		or result.internal_demolished > 0
+		or result.passage_deleted > 0
+		or result.passage_demolished > 0
+end
+
 -- Detect dome objects.
 function Dome.IsDome(obj)
 	if not FD.IsObjectValid(obj) then
@@ -769,39 +806,23 @@ function Dome.Delete(dome)
 	local internal_deleted = Dome.DeleteObjects(internal_buildings)
 	local dome_demolished = FD.Level1DemolishObject(dome) and 1 or 0
 	local dome_deleted = FD.Level2DeleteObject(dome) and 1 or 0
+	local result = {
+		summary = summary,
+		passage_ids = passage_ids,
+		idled_colonists = idled_colonists,
+		idled_drones = idled_drones,
+		passage_demolished = passage_demolished,
+		passage_deleted = passage_deleted,
+		passages_remaining = passages_remaining,
+		internal_demolished = internal_demolished,
+		internal_deleted = internal_deleted,
+		dome_demolished = dome_demolished,
+		dome_deleted = dome_deleted,
+	}
 
-	FD.ShowDeleteMessage(
-		"Ctrl+Shift+Delete pressed."
-			.. "\n\nDome: "
-			.. summary
-			.. "\nPassage ids: "
-			.. (passage_ids ~= "" and passage_ids or "none")
-			.. "\nColonists idled: "
-			.. FD.SafeToString(idled_colonists)
-			.. "\nDrones idled: "
-			.. FD.SafeToString(idled_drones)
-			.. "\nPassages demolished: "
-			.. FD.SafeToString(passage_demolished)
-			.. "\nPassages direct-deleted: "
-			.. FD.SafeToString(passage_deleted)
-			.. "\nPassages remaining: "
-			.. FD.SafeToString(passages_remaining)
-			.. "\nInternal buildings demolished: "
-			.. FD.SafeToString(internal_demolished)
-			.. "\nInternal buildings deleted: "
-			.. FD.SafeToString(internal_deleted)
-			.. "\nDome demolished: "
-			.. FD.SafeToString(dome_demolished)
-			.. "\nDome deleted: "
-			.. FD.SafeToString(dome_deleted)
-	)
+	FD.ShowDeleteMessage(DomeDeletionMessage(result))
 
-	return dome_deleted > 0
-		or dome_demolished > 0
-		or internal_deleted > 0
-		or internal_demolished > 0
-		or passage_deleted > 0
-		or passage_demolished > 0
+	return DomeDeletionSucceeded(result)
 end
 
 -- Return dome diagnostic attributes.
