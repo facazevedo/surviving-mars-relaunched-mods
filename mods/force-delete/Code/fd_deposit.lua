@@ -55,36 +55,6 @@ local function HasExcludedClassName(class)
 	return false
 end
 
--- Append one object to a collection once.
-local function AddUnique(list, seen, obj)
-	if not FD.IsObjectValid(obj) or seen[obj] then
-		return false
-	end
-
-	seen[obj] = true
-	list[#list + 1] = obj
-	return true
-end
-
--- Remove one object from an array/hash-style engine table.
-local function RemoveObjectFromTable(list, obj)
-	if type(list) ~= "table" or not obj then
-		return
-	end
-
-	for i = #list, 1, -1 do
-		if list[i] == obj then
-			table.remove(list, i)
-		end
-	end
-
-	for key, value in pairs(list) do
-		if key == obj or value == obj then
-			list[key] = nil
-		end
-	end
-end
-
 -- Visit valid object-like values in array/hash-style engine tables.
 local function ForEachTableObject(list, callback)
 	if type(list) ~= "table" or type(callback) ~= "function" then
@@ -203,12 +173,12 @@ local function PruneGlobalLabels(obj)
 	}) do
 		local labels = FD.ReadField(container, "labels")
 
-		if type(labels) == "table" then
-			for _, label_list in pairs(labels) do
-				RemoveObjectFromTable(label_list, obj)
-			end
+	if type(labels) == "table" then
+		for _, label_list in pairs(labels) do
+			FD.RemoveObjectFromTable(label_list, obj)
 		end
 	end
+end
 end
 
 -- Remove one marker from map-sector marker and revealed-deposit lists.
@@ -229,12 +199,12 @@ function Deposit.UnregisterMarker(marker)
 	local markers = FD.ReadField(sector, "markers")
 	if type(markers) == "table" then
 		for _, field in ipairs({ "surface", "subsurface", "deep", "block" }) do
-			RemoveObjectFromTable(markers[field], marker)
+			FD.RemoveObjectFromTable(markers[field], marker)
 		end
 	end
 
-	RemoveObjectFromTable(FD.ReadField(sector, "revealed_surf"), marker)
-	RemoveObjectFromTable(FD.ReadField(sector, "revealed_deep"), marker)
+	FD.RemoveObjectFromTable(FD.ReadField(sector, "revealed_surf"), marker)
+	FD.RemoveObjectFromTable(FD.ReadField(sector, "revealed_deep"), marker)
 	PruneGlobalLabels(marker)
 
 	return true
@@ -248,11 +218,11 @@ function Deposit.CollectRelatedObjects(obj)
 	local seen_markers = {}
 
 	local function add_marker(marker)
-		AddUnique(markers, seen_markers, marker)
+		FD.AddUniqueObject(markers, seen_markers, marker)
 	end
 
 	local function add_deposit(deposit)
-		if not AddUnique(objects, seen_objects, deposit) then
+		if not FD.AddUniqueObject(objects, seen_objects, deposit) then
 			return
 		end
 

@@ -28,16 +28,20 @@ return {
 		'CodeFileName', "Code/fd_shuttle.lua",
 	}),
 	PlaceObj('ModItemCode', {
-		'name', "ForceDeleteRovers",
-		'CodeFileName', "Code/fd_rovers.lua",
+		'name', "ForceDeleteRover",
+		'CodeFileName', "Code/fd_rover.lua",
+	}),
+	PlaceObj('ModItemCode', {
+		'name', "ForceDeleteRocket",
+		'CodeFileName', "Code/fd_rocket.lua",
 	}),
 	PlaceObj('ModItemCode', {
 		'name', "ForceDeleteDeposit",
 		'CodeFileName', "Code/fd_deposit.lua",
 	}),
 	PlaceObj('ModItemCode', {
-		'name', "ForceDeleteDecorations",
-		'CodeFileName', "Code/fd_decorations.lua",
+		'name', "ForceDeleteDecoration",
+		'CodeFileName', "Code/fd_decoration.lua",
 	}),
 	PlaceObj('ModItemCode', {
 		'name', "ForceDeleteInfrastructure",

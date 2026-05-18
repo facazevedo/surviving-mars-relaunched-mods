@@ -85,25 +85,6 @@ local related_delete_fields = {
 	"lead_in_out",
 }
 
--- Remove one object from an array/hash table without assuming an index.
-local function RemoveObjectFromTable(list, obj)
-	if type(list) ~= "table" or not obj then
-		return
-	end
-
-	for i = #list, 1, -1 do
-		if list[i] == obj then
-			table.remove(list, i)
-		end
-	end
-
-	for key, value in pairs(list) do
-		if key == obj or value == obj then
-			list[key] = nil
-		end
-	end
-end
-
 -- Append the dome owned by a related assignment object.
 local function AddRelatedDome(rows, colonist, field)
 	local related = FD.ReadField(colonist, field)
@@ -136,9 +117,9 @@ local function ClearTransportTicket(colonist)
 		for _, field in ipairs({ "src_station", "dst_station", "vehicle" }) do
 			local obj = FD.ReadField(ticket, field)
 
-			RemoveObjectFromTable(FD.ReadField(obj, "colonists_inbound"), colonist)
-			RemoveObjectFromTable(FD.ReadField(obj, "waiting_for_train"), colonist)
-			RemoveObjectFromTable(FD.ReadField(obj, "units"), colonist)
+			FD.RemoveObjectFromTable(FD.ReadField(obj, "colonists_inbound"), colonist)
+			FD.RemoveObjectFromTable(FD.ReadField(obj, "waiting_for_train"), colonist)
+			FD.RemoveObjectFromTable(FD.ReadField(obj, "units"), colonist)
 		end
 	end
 
@@ -279,7 +260,7 @@ function Colonist.PatchExitVehicle()
 		local holder = FD.ReadField(self, "holder")
 
 		if not holder or holder ~= vehicle or not IsSameMapSafe(self, vehicle) then
-			RemoveObjectFromTable(FD.ReadField(vehicle, "units"), self)
+			FD.RemoveObjectFromTable(FD.ReadField(vehicle, "units"), self)
 			FD.CallObjectMethod(self, "DiscardTransportTicket")
 			return false
 		end

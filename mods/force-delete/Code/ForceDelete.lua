@@ -24,12 +24,13 @@ FD.SUPPORTED_TYPES = {
 	{ object_type = "animal", module_name = "Animal", is_method = "IsAnimal" },
 	{ object_type = "shuttle", module_name = "Shuttle", is_method = "IsShuttle" },
 	{ object_type = "rover", module_name = "Rover", is_method = "IsRover" },
+	{ object_type = "rocket", module_name = "Rocket", is_method = "IsRocket" },
 	{ object_type = "dome", module_name = "Dome", is_method = "IsDome" },
 	{ object_type = "deposit", module_name = "Deposit", is_method = "IsDeposit" },
-	{ object_type = "decoration", module_name = "Decoration", is_method = "IsDecoration" },
 	{ object_type = "infrastructure", module_name = "Infrastructure", is_method = "IsInfrastructure" },
 	{ object_type = "internal_building", module_name = "InternalBuilding", is_method = "IsInternalBuilding" },
 	{ object_type = "external_building", module_name = "ExternalBuilding", is_method = "IsExternalBuilding" },
+	{ object_type = "decoration", module_name = "Decoration", is_method = "IsDecoration" },
 }
 
 -- Return an optional engine global without creating it.
@@ -269,6 +270,57 @@ function FD.AddFieldAttributes(rows, obj, fields)
 	end
 end
 
+-- Append a valid object to a list once, using a caller-owned seen table.
+function FD.AddUniqueObject(list, seen, obj)
+	if type(list) ~= "table" or type(seen) ~= "table" then
+		return false
+	end
+
+	if not FD.IsObjectValid(obj) or seen[obj] then
+		return false
+	end
+
+	seen[obj] = true
+	list[#list + 1] = obj
+	return true
+end
+
+-- Remove one object from array-style and hash-style engine tables.
+function FD.RemoveObjectFromTable(list, obj)
+	if type(list) ~= "table" or not obj then
+		return
+	end
+
+	for i = #list, 1, -1 do
+		if list[i] == obj then
+			table.remove(list, i)
+		end
+	end
+
+	for key, value in pairs(list) do
+		if key == obj or value == obj then
+			list[key] = nil
+		end
+	end
+end
+
+-- Count how many objects successfully complete one action.
+function FD.CountSuccessfulActions(objects, action)
+	if type(action) ~= "function" then
+		return 0
+	end
+
+	local count = 0
+
+	for _, obj in ipairs(objects or {}) do
+		if action(obj) then
+			count = count + 1
+		end
+	end
+
+	return count
+end
+
 -- Return a boolean result from an object method, or nil if unavailable.
 function FD.MethodBool(obj, method)
 	local fn = FD.ReadField(obj, method)
@@ -315,6 +367,21 @@ function FD.StopCommandNoDestructors(obj)
 	FD.WriteField(obj, "command_thread", nil)
 	FD.WriteField(obj, "thread_running_destructors", nil)
 	FD.WriteField(obj, "command", "Idle")
+end
+
+-- Deactivate the rover/unit-control dialog before a controlled unit is deleted.
+function FD.DeactivateUnitControlFor(obj)
+	if not FD.IsObjectValid(obj) then
+		return false
+	end
+
+	local dlg = FD.SafeCall(FD.Global("GetUnitControlDlg"), obj)
+	if dlg and FD.CallObjectMethod(dlg, "DeactivateUnitControl") then
+		return true
+	end
+
+	FD.SafeCall(FD.Global("SetUnitControlInteractionMode"), obj, false)
+	return false
 end
 
 -- Stop an active demolition countdown thread before forcing demolition now.
@@ -364,12 +431,16 @@ function FD.DemolishThenClearObject(obj)
 	return true
 end
 
--- Demolish, clear, then direct-delete only if the object still exists.
+-- Demolish and clear only objects that have a real demolition/remains path.
 function FD.DeleteAfterDemolishAndClear(obj)
-	local changed = FD.DemolishThenClearObject(obj)
+	local changed = false
 
-	if not FD.IsObjectValid(obj) then
-		return changed
+	if FD.IsDemolishable(obj) or FD.IsDemolishedBuilding(obj) then
+		changed = FD.DemolishThenClearObject(obj)
+
+		if not FD.IsObjectValid(obj) then
+			return changed
+		end
 	end
 
 	return FD.DeleteObjectDirect(obj) or changed
@@ -389,7 +460,13 @@ function FD.DeleteObjectDirect(obj)
 		return true
 	end
 
-	return FD.SafeCall(FD.Global("DoneObject"), obj) and true or false
+	local done_object = FD.Global("DoneObject")
+	if type(done_object) ~= "function" then
+		return false
+	end
+
+	local ok = pcall(done_object, obj)
+	return ok
 end
 
 -- Delete one non-unit object through demolition first, then direct fallback.
@@ -519,12 +596,7 @@ end
 
 -- Append a valid object once so multi-selection batches do not duplicate work.
 function FD.AddUniqueSelectedObject(objects, seen, obj)
-	if not FD.IsObjectValid(obj) or seen[obj] then
-		return
-	end
-
-	seen[obj] = true
-	objects[#objects + 1] = obj
+	FD.AddUniqueObject(objects, seen, obj)
 end
 
 -- Append valid objects from an array-style selection table.
@@ -592,6 +664,14 @@ end
 
 -- Clear active gameplay/editor selection before deleting selected objects.
 function FD.ClearSelection()
+	for _, obj in ipairs(FD.SelectedObjects()) do
+		FD.DeactivateUnitControlFor(obj)
+	end
+
+	if FD.Global("FocusInfopanel") ~= nil then
+		rawset(_G, "FocusInfopanel", false)
+	end
+
 	FD.SafeCall(FD.Global("SelectObj"), false)
 
 	local editor = FD.Global("editor")

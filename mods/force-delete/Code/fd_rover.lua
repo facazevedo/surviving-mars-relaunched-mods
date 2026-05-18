@@ -5,8 +5,8 @@ local FD = ForceDelete
 if not FD then return end
 
 -- Avoid redefining rover helpers on repeated mod loads.
-if FD.rovers_loaded then return end
-FD.rovers_loaded = true
+if FD.rover_loaded then return end
+FD.rover_loaded = true
 
 -- Create the rover module namespace.
 FD.Rover = FD.Rover or {}
@@ -102,6 +102,7 @@ end
 
 -- Clear rover routing and command-center references before deletion.
 local function PrepareForDelete(rover)
+	FD.DeactivateUnitControlFor(rover)
 	FD.CallObjectMethod(rover, "ClearPath")
 	FD.CallObjectMethod(rover, "ClearRequests")
 	FD.CallObjectMethod(rover, "DisconnectFromCommandCenters")

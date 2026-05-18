@@ -63,18 +63,43 @@ local delete_request_fields = {
 	"resource_request",
 }
 
+-- Write the same value to a list of fields.
+local function ClearFields(obj, fields, value)
+	for _, field in ipairs(fields) do
+		FD.WriteField(obj, field, value)
+	end
+end
+
 -- Clear target and request state before related objects are deleted.
 local function PrepareForRelatedObjectDelete(drone)
-	for _, field in ipairs(delete_target_fields) do
-		FD.WriteField(drone, field, false)
-	end
-
-	for _, field in ipairs(delete_request_fields) do
-		FD.WriteField(drone, field, nil)
-	end
-
+	ClearFields(drone, delete_target_fields, false)
+	ClearFields(drone, delete_request_fields, nil)
 	FD.WriteField(drone, "resource", false)
 	FD.WriteField(drone, "amount", 0)
+end
+
+-- Show one standard drone delete result message.
+local function ShowDeleteResult(status, summary)
+	FD.ShowDeleteMessage("Ctrl+Shift+Delete pressed.\n\n" .. status .. " drone: " .. summary)
+end
+
+-- Ask the game's command system to kill the drone when that path exists.
+local function TryCommandedDeath(drone)
+	return type(FD.ReadField(drone, "DieNow")) == "function"
+		and FD.CallObjectMethod(drone, "SetCommand", "DieNow")
+end
+
+-- Fall back through direct drone deletion methods.
+local function TryDirectDelete(drone)
+	if FD.CallObjectMethod(drone, "DieNow") then
+		return true
+	end
+
+	if FD.CallObjectMethod(drone, "delete") then
+		return true
+	end
+
+	return FD.SafeCall(FD.Global("DoneObject"), drone)
 end
 
 -- Detect mobile drones while excluding drone-related buildings.
@@ -132,31 +157,17 @@ function Drone.Delete(drone)
 	local summary = FD.ObjectSummary(drone)
 
 	-- Prefer the game's drone death command for normal cleanup.
-	if type(FD.ReadField(drone, "DieNow")) == "function"
-		and FD.CallObjectMethod(drone, "SetCommand", "DieNow") then
-		FD.ShowDeleteMessage("Ctrl+Shift+Delete pressed.\n\nDeleting drone: " .. summary)
+	if TryCommandedDeath(drone) then
+		ShowDeleteResult("Deleting", summary)
 		return true
 	end
 
-	-- Fall back to direct drone death if command dispatch is unavailable.
-	if FD.CallObjectMethod(drone, "DieNow") then
-		FD.ShowDeleteMessage("Ctrl+Shift+Delete pressed.\n\nDeleted drone: " .. summary)
+	if TryDirectDelete(drone) then
+		ShowDeleteResult("Deleted", summary)
 		return true
 	end
 
-	-- Fall back to direct object removal if the death path is unavailable.
-	if FD.CallObjectMethod(drone, "delete") then
-		FD.ShowDeleteMessage("Ctrl+Shift+Delete pressed.\n\nDeleted drone: " .. summary)
-		return true
-	end
-
-	-- Use DoneObject as the final engine-level fallback.
-	if FD.SafeCall(FD.Global("DoneObject"), drone) then
-		FD.ShowDeleteMessage("Ctrl+Shift+Delete pressed.\n\nDeleted drone: " .. summary)
-		return true
-	end
-
-	FD.ShowDeleteMessage("Ctrl+Shift+Delete pressed.\n\nCould not delete drone: " .. summary)
+	ShowDeleteResult("Could not delete", summary)
 	return false
 end
 

@@ -166,36 +166,6 @@ local function ObjectId(obj)
 		or FD.ObjectSummary(obj)
 end
 
--- Append an object to a collection once.
-local function AddUnique(list, seen, obj)
-	if not FD.IsObjectValid(obj) or seen[obj] then
-		return false
-	end
-
-	seen[obj] = true
-	list[#list + 1] = obj
-	return true
-end
-
--- Remove one object from an array/hash-style engine table.
-local function RemoveObjectFromTable(list, obj)
-	if type(list) ~= "table" or not obj then
-		return
-	end
-
-	for i = #list, 1, -1 do
-		if list[i] == obj then
-			table.remove(list, i)
-		end
-	end
-
-	for key, value in pairs(list) do
-		if key == obj or value == obj then
-			list[key] = nil
-		end
-	end
-end
-
 -- Visit object-like values in an engine table without scanning indefinitely.
 -- A callback may return true to stop the scan early.
 local function ForEachTableObject(list, callback)
@@ -237,23 +207,6 @@ local function ForEachTableObject(list, callback)
 	end
 end
 
--- Count how many objects successfully complete one action.
-local function CountSuccessfulActions(objects, action)
-	if type(action) ~= "function" then
-		return 0
-	end
-
-	local count = 0
-
-	for _, obj in ipairs(objects or {}) do
-		if action(obj) then
-			count = count + 1
-		end
-	end
-
-	return count
-end
-
 -- Return whether an object is a component light owned by dome visuals.
 local function IsComponentLight(obj)
 	return FD.IsObjectValid(obj)
@@ -285,7 +238,7 @@ function Dome.CollectComponentLightsFrom(obj, lights, seen)
 		return
 	end
 
-	AddUnique(lights, seen, FD.ReadField(obj, "cupola_interior_marker"))
+	FD.AddUniqueObject(lights, seen, FD.ReadField(obj, "cupola_interior_marker"))
 
 	if type(FD.ReadField(obj, "ForEachAttach")) ~= "function" then
 		return
@@ -293,14 +246,14 @@ function Dome.CollectComponentLightsFrom(obj, lights, seen)
 
 	pcall(function()
 		obj:ForEachAttach("ComponentLight", function(attach)
-			AddUnique(lights, seen, attach)
+			FD.AddUniqueObject(lights, seen, attach)
 		end)
 	end)
 
 	pcall(function()
 		obj:ForEachAttach(function(attach)
 			if IsComponentLight(attach) then
-				AddUnique(lights, seen, attach)
+				FD.AddUniqueObject(lights, seen, attach)
 			end
 		end)
 	end)
@@ -353,7 +306,7 @@ function Dome.DisableDomeLights(dome, internal_buildings)
 		Dome.CollectComponentLightsFrom(building, lights, seen)
 	end
 
-	local destroyed = CountSuccessfulActions(lights, Dome.DestroyComponentLight)
+	local destroyed = FD.CountSuccessfulActions(lights, Dome.DestroyComponentLight)
 
 	FD.WriteField(dome, "cupola_interior_marker", false)
 	FD.CallObjectMethod(dome, "DestroyAttaches", "ComponentLight")
@@ -414,7 +367,7 @@ end
 
 -- Add a passage and its directly owned pieces to the staged passage list.
 local function AddPassageWithPieces(passages, seen, passage)
-	if not AddUnique(passages, seen, passage) then
+	if not FD.AddUniqueObject(passages, seen, passage) then
 		return
 	end
 
@@ -422,10 +375,10 @@ local function AddPassageWithPieces(passages, seen, passage)
 		local value = FD.ReadField(passage, field)
 
 		if FD.IsObjectValid(value) then
-			AddUnique(passages, seen, value)
+			FD.AddUniqueObject(passages, seen, value)
 		else
 			ForEachTableObject(value, function(piece)
-				AddUnique(passages, seen, piece)
+				FD.AddUniqueObject(passages, seen, piece)
 			end)
 		end
 	end
@@ -568,8 +521,8 @@ function Dome.CollectConnectedPassageControllers(dome)
 
 	if type(connected_passages) == "table" then
 		for key, value in pairs(connected_passages) do
-			AddUnique(passages, seen, Dome.PassageControllerFor(key))
-			AddUnique(passages, seen, Dome.PassageControllerFor(value))
+			FD.AddUniqueObject(passages, seen, Dome.PassageControllerFor(key))
+			FD.AddUniqueObject(passages, seen, Dome.PassageControllerFor(value))
 		end
 	end
 
@@ -600,7 +553,7 @@ local function CollectInternalBuildings(dome, include_labels)
 				or FD.ReadField(obj, "parent_dome") == dome
 				or FD.ReadField(obj, "parent") == dome
 			) then
-			AddUnique(buildings, seen, obj)
+			FD.AddUniqueObject(buildings, seen, obj)
 		end
 	end
 
@@ -775,7 +728,7 @@ function Dome.CollectAffectedObjectsFromContainer(container, matches, objects, s
 			local ok, is_match = pcall(matches, obj)
 
 			if ok and is_match then
-				AddUnique(objects, seen, obj)
+				FD.AddUniqueObject(objects, seen, obj)
 			end
 		end)
 	end
@@ -820,7 +773,7 @@ end
 
 -- Detach and idle colonists before deleting the objects they target.
 function Dome.IdleAffectedColonists(dome, passages, internal_buildings, targets)
-	return CountSuccessfulActions(
+	return FD.CountSuccessfulActions(
 		Dome.CollectAffectedColonists(dome, passages, internal_buildings, targets),
 		function(colonist)
 			return FD.Colonist and FD.Colonist.IdleForRelatedObjectDelete(colonist)
@@ -893,7 +846,7 @@ end
 
 -- Detach and idle drones before deleting the objects they target.
 function Dome.IdleAffectedDrones(dome, passages, internal_buildings, targets)
-	return CountSuccessfulActions(
+	return FD.CountSuccessfulActions(
 		Dome.CollectAffectedDrones(dome, passages, internal_buildings, targets),
 		function(drone)
 			return FD.Drone and FD.Drone.IdleForRelatedObjectDelete(drone)
@@ -951,7 +904,7 @@ end
 
 -- Detach and idle shuttles before deleting the objects they target.
 function Dome.IdleAffectedShuttles(dome, passages, internal_buildings, targets)
-	return CountSuccessfulActions(
+	return FD.CountSuccessfulActions(
 		Dome.CollectAffectedShuttles(dome, passages, internal_buildings, targets),
 		function(shuttle)
 			return FD.Shuttle and FD.Shuttle.IdleForRelatedObjectDelete(shuttle)
@@ -961,12 +914,12 @@ end
 
 -- Run Level 1-style demolition on a collection.
 function Dome.DemolishObjects(objects)
-	return CountSuccessfulActions(objects, FD.Level1DemolishObject)
+	return FD.CountSuccessfulActions(objects, FD.Level1DemolishObject)
 end
 
 -- Run the Level 2 delete sequence on a collection.
 function Dome.DeleteObjects(objects)
-	return CountSuccessfulActions(objects, FD.Level2DeleteObject)
+	return FD.CountSuccessfulActions(objects, FD.Level2DeleteObject)
 end
 
 -- Remove stale references from one table before the dome's Done handler runs.
@@ -976,7 +929,7 @@ function Dome.PruneDeleteReferencesFromTable(list, delete_set)
 	end
 
 	for obj in pairs(delete_set or {}) do
-		RemoveObjectFromTable(list, obj)
+		FD.RemoveObjectFromTable(list, obj)
 	end
 
 	for i = #list, 1, -1 do
