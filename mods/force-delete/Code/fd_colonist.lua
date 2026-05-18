@@ -24,6 +24,7 @@ local state_fields = {
 	"emigration_elevator",
 	"leaving_elevator",
 	"transport_ticket",
+	"transport_task",
 	"work_route",
 	"lead_in_out",
 	"lead_interrupted",
@@ -79,6 +80,7 @@ local related_delete_fields = {
 	"leaving_tunnel",
 	"fx_moving_target",
 	"transport_ticket",
+	"transport_task",
 	"work_route",
 	"lead_in_out",
 }
@@ -124,6 +126,46 @@ local function PrepareForDelete(colonist)
 	FD.CallObjectMethod(colonist, "SetResidence", false)
 	FD.CallObjectMethod(colonist, "SetDome", false)
 	FD.CallObjectMethod(colonist, "ClearPath")
+end
+
+-- Clear train transport state without starting a replacement command.
+local function ClearTransportTicket(colonist)
+	local ticket = FD.ReadField(colonist, "transport_ticket")
+
+	if type(ticket) == "table" or type(ticket) == "userdata" then
+		for _, field in ipairs({ "src_station", "dst_station", "vehicle" }) do
+			local obj = FD.ReadField(ticket, field)
+
+			RemoveObjectFromTable(FD.ReadField(obj, "colonists_inbound"), colonist)
+			RemoveObjectFromTable(FD.ReadField(obj, "waiting_for_train"), colonist)
+			RemoveObjectFromTable(FD.ReadField(obj, "units"), colonist)
+		end
+	end
+
+	FD.WriteField(colonist, "transport_ticket", false)
+	FD.WriteField(colonist, "work_route", false)
+	FD.WriteField(colonist, "leave_early_for_work", false)
+end
+
+-- Clear shuttle transport task links that can wake after dome deletion.
+local function ClearTransportTask(colonist)
+	local task = FD.ReadField(colonist, "transport_task")
+
+	if type(task) == "table" or type(task) == "userdata" then
+		local shuttle = FD.ReadField(task, "shuttle")
+
+		if FD.IsObjectValid(shuttle) and FD.ReadField(shuttle, "transport_task") == task then
+			FD.WriteField(shuttle, "transport_task", false)
+			FD.WriteField(shuttle, "is_colonist_transport_task", false)
+			FD.WriteField(shuttle, "dest_dome", false)
+		end
+
+		if FD.ReadField(task, "colonist") == colonist then
+			FD.WriteField(task, "colonist", false)
+		end
+	end
+
+	FD.WriteField(colonist, "transport_task", false)
 end
 
 -- Return whether an object or point has a valid game position.
@@ -197,6 +239,8 @@ end
 -- Clear movement and visit state that may reference soon-deleted objects.
 local function PrepareForRelatedObjectDelete(colonist)
 	EnsureValidPosition(colonist)
+	ClearTransportTicket(colonist)
+	ClearTransportTask(colonist)
 	PrepareForDelete(colonist)
 
 	for _, field in ipairs(related_delete_fields) do
@@ -264,6 +308,30 @@ function Colonist.PatchExitVehicle()
 	end
 
 	Colonist.exit_vehicle_patched = true
+	return true
+end
+
+-- Patch stale building entry attempts so deleted passages do not assert later.
+function Colonist.PatchEnterBuilding()
+	if Colonist.enter_building_patched then
+		return true
+	end
+
+	local colonist_class = FD.Global("Colonist")
+	local original = FD.ReadField(colonist_class, "EnterBuilding")
+	if type(original) ~= "function" then
+		return false
+	end
+
+	colonist_class.EnterBuilding = function(self, building, ...)
+		if not FD.IsObjectValid(self) or not FD.IsObjectValid(building) then
+			return false
+		end
+
+		return original(self, building, ...)
+	end
+
+	Colonist.enter_building_patched = true
 	return true
 end
 
@@ -354,4 +422,7 @@ end
 -- Install the transport patch now and retry when game classes are finalized.
 FD.ChainOnMsg("ClassesPostprocess", "force_delete_colonist_exit_vehicle", Colonist.PatchExitVehicle)
 FD.ChainOnMsg("DataLoaded", "force_delete_colonist_exit_vehicle", Colonist.PatchExitVehicle)
+FD.ChainOnMsg("ClassesPostprocess", "force_delete_colonist_enter_building", Colonist.PatchEnterBuilding)
+FD.ChainOnMsg("DataLoaded", "force_delete_colonist_enter_building", Colonist.PatchEnterBuilding)
 Colonist.PatchExitVehicle()
+Colonist.PatchEnterBuilding()

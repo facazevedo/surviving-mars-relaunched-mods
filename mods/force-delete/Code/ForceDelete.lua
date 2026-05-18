@@ -208,6 +208,29 @@ function FD.IsBuildingLike(obj)
 		or type(FD.ReadField(obj, "DoDemolish")) == "function"
 end
 
+-- Return whether an object is already demolished building remains.
+function FD.IsDemolishedBuilding(obj)
+	return FD.IsBuildingLike(obj)
+		and FD.ReadField(obj, "destroyed") == true
+		and FD.ReadField(obj, "demolishing") ~= true
+end
+
+-- Clear already-demolished building remains before normal delete attempts.
+function FD.ClearDemolishedBuilding(obj)
+	if not FD.IsDemolishedBuilding(obj) then
+		return false
+	end
+
+	if FD.CallObjectMethod(obj, "ClearDone") then
+		return true
+	end
+
+	-- If immediate clearing is unavailable, at least ask the game cleanup path
+	-- to mark the remains for clearing before the direct delete fallback runs.
+	FD.CallObjectMethod(obj, "DestroyedClear")
+	return false
+end
+
 -- Return whether an object is one of the live unit types handled separately.
 function FD.IsProtectedUnit(obj)
 	return (FD.Colonist and FD.Colonist.IsColonist(obj))
@@ -284,6 +307,10 @@ end
 
 -- Try the game's own demolition transition before using direct deletion.
 function FD.DemolishObjectNow(obj)
+	if FD.ClearDemolishedBuilding(obj) then
+		return true
+	end
+
 	if not FD.IsDemolishable(obj) or type(FD.ReadField(obj, "DoDemolish")) ~= "function" then
 		return false
 	end
@@ -295,10 +322,44 @@ function FD.DemolishObjectNow(obj)
 	return FD.CallObjectMethod(obj, "DoDemolish")
 end
 
+-- Demolish an object and clear the ruins when demolition leaves remains.
+function FD.DemolishThenClearObject(obj)
+	if FD.ClearDemolishedBuilding(obj) then
+		return true
+	end
+
+	local demolished = FD.DemolishObjectNow(obj)
+	if not demolished then
+		return false
+	end
+
+	if not FD.IsObjectValid(obj) then
+		return true
+	end
+
+	FD.ClearDemolishedBuilding(obj)
+	return true
+end
+
+-- Demolish, clear, then direct-delete only if the object still exists.
+function FD.DeleteAfterDemolishAndClear(obj)
+	local changed = FD.DemolishThenClearObject(obj)
+
+	if not FD.IsObjectValid(obj) then
+		return changed
+	end
+
+	return FD.DeleteObjectDirect(obj) or changed
+end
+
 -- Remove an object directly when the normal demolition path is unavailable.
 function FD.DeleteObjectDirect(obj)
 	if not FD.IsObjectValid(obj) then
 		return false
+	end
+
+	if FD.ClearDemolishedBuilding(obj) then
+		return true
 	end
 
 	if FD.CallObjectMethod(obj, "delete") then
@@ -310,7 +371,7 @@ end
 
 -- Delete one non-unit object through demolition first, then direct fallback.
 function FD.DeleteNonUnitObject(obj)
-	return FD.DemolishObjectNow(obj) or FD.DeleteObjectDirect(obj)
+	return FD.DeleteAfterDemolishAndClear(obj)
 end
 
 -- Guard engine request cleanup against stale boolean request references.
@@ -338,12 +399,12 @@ end
 
 -- Run only the Level 1-style demolition stage for one non-unit object.
 function FD.Level1DemolishObject(obj)
-	return FD.DemolishObjectNow(obj)
+	return FD.DemolishThenClearObject(obj)
 end
 
--- Run only the Level 2-style direct deletion stage for one object.
+-- Run the Level 2 sequence: demolish, clear, then direct-delete if needed.
 function FD.Level2DeleteObject(obj)
-	return FD.DeleteObjectDirect(obj)
+	return FD.DeleteAfterDemolishAndClear(obj)
 end
 
 -- Delete a named non-unit type and report a concise result message.
@@ -366,12 +427,8 @@ end
 -- Append common identity, level, and validity rows for supported objects.
 function FD.AddCommonObjectAttributes(rows, obj, object_type, reason)
 	local object_level = FD.ConfiguredLevelForType(object_type, obj)
-	local level_1_allowed = FD.Config
-		and FD.Config.CanForceDeleteAtLevel
-		and FD.Config.CanForceDeleteAtLevel(object_type, 1, obj)
-	local level_2_allowed = FD.Config
-		and FD.Config.CanForceDeleteAtLevel
-		and FD.Config.CanForceDeleteAtLevel(object_type, 2, obj)
+	local level_1_allowed = FD.CanDeleteAtLevel(object_type, 1, obj)
+	local level_2_allowed = FD.CanDeleteAtLevel(object_type, 2, obj)
 
 	FD.AddAttribute(rows, "is_demolishable", FD.IsDemolishable(obj))
 	FD.AddAttribute(rows, "Selected", FD.ObjectSummary(obj))
@@ -558,6 +615,17 @@ function FD.ConfiguredLevelForType(object_type, obj)
 	return false
 end
 
+-- Return whether one shortcut level may delete one object type.
+function FD.CanDeleteAtLevel(object_type, requested_level, obj)
+	if object_type == "dome" and requested_level < 2 then
+		return false
+	end
+
+	return FD.Config
+		and FD.Config.CanForceDeleteAtLevel
+		and FD.Config.CanForceDeleteAtLevel(object_type, requested_level, obj)
+end
+
 -- Show shortcut feedback without making shortcut handlers know display details.
 function FD.ShowShortcutMessage(message)
 	if FD.DisplayAttributes then
@@ -678,9 +746,7 @@ function FD.RunForceDeleteLevel(requested_level, shortcut_message)
 		local object_level = FD.ConfiguredLevelForType(object_type, obj)
 		local can_delete = object_type
 			and object_level
-			and FD.Config
-			and FD.Config.CanForceDeleteAtLevel
-			and FD.Config.CanForceDeleteAtLevel(object_type, requested_level, obj)
+			and FD.CanDeleteAtLevel(object_type, requested_level, obj)
 
 		if can_delete then
 			delete_plan[#delete_plan + 1] = {

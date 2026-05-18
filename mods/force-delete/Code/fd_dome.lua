@@ -67,6 +67,36 @@ local colonist_reference_table_fields = {
 	"work_route",
 }
 
+-- Transport ticket fields can be userdata-backed, so read them explicitly.
+local colonist_transport_ticket_fields = {
+	"src_station",
+	"dst_station",
+	"destination",
+	"vehicle",
+	"param",
+}
+
+-- Shuttle transport task fields can point colonists back at doomed domes.
+local colonist_transport_task_fields = {
+	"source_dome",
+	"dest_dome",
+	"shuttle",
+	"dest_pos",
+}
+
+-- Commands that can keep hidden building/passage arguments on the command stack.
+local colonist_transport_commands = {
+	BoardVehicle = true,
+	DisembarkOnArrival = true,
+	ExitVehicle = true,
+	GoToDome = true,
+	GoToStation = true,
+	MigrateByTrain = true,
+	TransportByFoot = true,
+	UseElevator = true,
+	WaitForTransport = true,
+}
+
 -- Fields that can keep drones targeting a soon-deleted dome object.
 local drone_reference_fields = {
 	"command_center",
@@ -666,6 +696,41 @@ function Dome.TableFieldsTargetDomeDelete(obj, fields, dome, targets)
 	return false
 end
 
+-- Return whether a colonist transport ticket points at doomed dome objects.
+function Dome.ColonistTransportTicketTargetsDomeDelete(ticket, dome, targets)
+	if type(ticket) ~= "table" and type(ticket) ~= "userdata" then
+		return false
+	end
+
+	for _, field in ipairs(colonist_transport_ticket_fields) do
+		if Dome.ValueTargetsDomeDelete(FD.ReadField(ticket, field), dome, targets) then
+			return true
+		end
+	end
+
+	return false
+end
+
+-- Return whether a colonist shuttle task points at doomed dome objects.
+function Dome.ColonistTransportTaskTargetsDomeDelete(task, dome, targets)
+	if type(task) ~= "table" and type(task) ~= "userdata" then
+		return false
+	end
+
+	for _, field in ipairs(colonist_transport_task_fields) do
+		if Dome.ValueTargetsDomeDelete(FD.ReadField(task, field), dome, targets) then
+			return true
+		end
+	end
+
+	return false
+end
+
+-- Return whether a colonist command may hold hidden dome/passage arguments.
+function Dome.ColonistHasTransportCommand(colonist)
+	return colonist_transport_commands[FD.ReadField(colonist, "command")] == true
+end
+
 -- Return whether a colonist is currently tied to the dome deletion target set.
 function Dome.ColonistTargetsDomeDelete(colonist, dome, targets)
 	if not FD.Colonist or not FD.Colonist.IsColonist(colonist) then
@@ -674,6 +739,17 @@ function Dome.ColonistTargetsDomeDelete(colonist, dome, targets)
 
 	return Dome.FieldsTargetDomeDelete(colonist, colonist_reference_fields, dome, targets)
 		or Dome.TableFieldsTargetDomeDelete(colonist, colonist_reference_table_fields, dome, targets)
+		or Dome.ColonistTransportTicketTargetsDomeDelete(
+			FD.ReadField(colonist, "transport_ticket"),
+			dome,
+			targets
+		)
+		or Dome.ColonistTransportTaskTargetsDomeDelete(
+			FD.ReadField(colonist, "transport_task"),
+			dome,
+			targets
+		)
+		or Dome.ColonistHasTransportCommand(colonist)
 end
 
 -- Add affected objects from one container's label tables.
@@ -880,12 +956,12 @@ function Dome.DemolishObjects(objects)
 	return CountSuccessfulActions(objects, FD.Level1DemolishObject)
 end
 
--- Run Level 2-style direct deletion on a collection.
+-- Run the Level 2 delete sequence on a collection.
 function Dome.DeleteObjects(objects)
 	return CountSuccessfulActions(objects, FD.Level2DeleteObject)
 end
 
--- Demolish one passage and direct-delete it only if demolition left it valid.
+-- Demolish one passage and run Level 2 only if demolition left it valid.
 function Dome.DeletePassageSequentially(passage)
 	if not Dome.IsPassageController(passage) then
 		return false, false
@@ -919,6 +995,18 @@ function Dome.DeletePassagesSequentially(passages)
 	end
 
 	return demolished, deleted
+end
+
+-- Demolish and clear the dome shell before falling back to direct deletion.
+function Dome.DeleteDomeShell(dome)
+	local demolished_or_cleared = FD.DemolishThenClearObject(dome)
+
+	if not FD.IsObjectValid(dome) then
+		return demolished_or_cleared and 1 or 0, 0
+	end
+
+	local deleted = FD.DeleteObjectDirect(dome)
+	return demolished_or_cleared and 1 or 0, deleted and 1 or 0
 end
 
 -- Format the staged dome deletion result for the inspector panel.
@@ -1006,9 +1094,8 @@ function Dome.Delete(dome)
 	local passages_remaining = Dome.CountConnectedPassages(dome)
 	local internal_demolished = Dome.DemolishObjects(internal_buildings)
 	local internal_deleted = Dome.DeleteObjects(internal_buildings)
-	local dome_demolished = FD.Level1DemolishObject(dome) and 1 or 0
 	lights_destroyed = lights_destroyed + Dome.DisableDomeLights(dome)
-	local dome_deleted = FD.Level2DeleteObject(dome) and 1 or 0
+	local dome_demolished, dome_deleted = Dome.DeleteDomeShell(dome)
 	local result = {
 		summary = summary,
 		passage_ids = passage_ids,
