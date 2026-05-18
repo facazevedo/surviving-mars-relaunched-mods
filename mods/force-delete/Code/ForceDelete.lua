@@ -24,6 +24,7 @@ FD.SUPPORTED_TYPES = {
 	{ object_type = "animal", module_name = "Animal", is_method = "IsAnimal" },
 	{ object_type = "shuttle", module_name = "Shuttle", is_method = "IsShuttle" },
 	{ object_type = "rover", module_name = "Rover", is_method = "IsRover" },
+	{ object_type = "train", module_name = "Train", is_method = "IsTrain" },
 	{ object_type = "rocket", module_name = "Rocket", is_method = "IsRocket" },
 	{ object_type = "dome", module_name = "Dome", is_method = "IsDome" },
 	{ object_type = "deposit", module_name = "Deposit", is_method = "IsDeposit" },
@@ -246,6 +247,7 @@ function FD.IsProtectedUnit(obj)
 		or (FD.Animal and FD.Animal.IsAnimal(obj))
 		or (FD.Shuttle and FD.Shuttle.IsShuttle(obj))
 		or (FD.Rover and FD.Rover.IsRover(obj))
+		or (FD.Train and FD.Train.IsTrain(obj))
 end
 
 -- Return whether an object is a dome-like building that needs separate logic later.
@@ -307,6 +309,55 @@ function FD.RemoveObjectFromTable(list, obj)
 			list[key] = nil
 		end
 	end
+end
+
+-- Visit valid object-like values in array/hash-style engine tables.
+function FD.ForEachTableObject(list, callback, max_scan)
+	if type(list) ~= "table" or type(callback) ~= "function" then
+		return
+	end
+
+	local scanned = 0
+	local visited = {}
+	local limit = max_scan or FD.MAX_SCAN
+
+	local function visit(obj)
+		if FD.IsObjectValid(obj) and not visited[obj] then
+			visited[obj] = true
+			callback(obj)
+		end
+	end
+
+	for _, obj in ipairs(list) do
+		scanned = scanned + 1
+		if limit and scanned > limit then
+			return
+		end
+
+		visit(obj)
+	end
+
+	for key, value in pairs(list) do
+		scanned = scanned + 1
+		if limit and scanned > limit then
+			return
+		end
+
+		visit(key)
+		visit(value)
+	end
+end
+
+-- Return valid objects from a mixed array/hash-style engine table.
+function FD.ValidObjectsFromTable(list, max_scan)
+	local objects = {}
+	local seen = {}
+
+	FD.ForEachTableObject(list, function(obj)
+		FD.AddUniqueObject(objects, seen, obj)
+	end, max_scan)
+
+	return objects
 end
 
 -- Count how many objects successfully complete one action.

@@ -24,11 +24,12 @@ FD.Config.DEMOLISHABLE_OBJECT_LEVEL = 1
 FD.Config.NON_DEMOLISHABLE_OBJECT_LEVEL = 2
 
 -- Optional per-type overrides can pin a type to a specific level when needed.
--- Domes need staged deletion; rockets and rovers own live command state.
+-- Domes need staged deletion; rockets, rovers, and trains own live command state.
 FD.Config.FORCE_DELETE_LEVELS = {
 	dome = 2,
 	rocket = 2,
 	rover = 2,
+	train = 2,
 }
 
 -- ============================================================================

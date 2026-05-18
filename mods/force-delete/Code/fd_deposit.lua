@@ -55,42 +55,6 @@ local function HasExcludedClassName(class)
 	return false
 end
 
--- Visit valid object-like values in array/hash-style engine tables.
-local function ForEachTableObject(list, callback)
-	if type(list) ~= "table" or type(callback) ~= "function" then
-		return
-	end
-
-	local scanned = 0
-	local visited = {}
-
-	local function visit(obj)
-		if FD.IsObjectValid(obj) and not visited[obj] then
-			visited[obj] = true
-			callback(obj)
-		end
-	end
-
-	for _, obj in ipairs(list) do
-		scanned = scanned + 1
-		if scanned > FD.MAX_SCAN then
-			return
-		end
-
-		visit(obj)
-	end
-
-	for key, value in pairs(list) do
-		scanned = scanned + 1
-		if scanned > FD.MAX_SCAN then
-			return
-		end
-
-		visit(key)
-		visit(value)
-	end
-end
-
 -- Return whether an object is a deposit marker.
 function Deposit.IsMarker(obj)
 	return FD.IsObjectValid(obj)
@@ -173,12 +137,12 @@ local function PruneGlobalLabels(obj)
 	}) do
 		local labels = FD.ReadField(container, "labels")
 
-	if type(labels) == "table" then
-		for _, label_list in pairs(labels) do
-			FD.RemoveObjectFromTable(label_list, obj)
+		if type(labels) == "table" then
+			for _, label_list in pairs(labels) do
+				FD.RemoveObjectFromTable(label_list, obj)
+			end
 		end
 	end
-end
 end
 
 -- Remove one marker from map-sector marker and revealed-deposit lists.
@@ -232,7 +196,7 @@ function Deposit.CollectRelatedObjects(obj)
 	add_deposit(obj)
 
 	for _, field in ipairs({ "group", "objects", "deposits" }) do
-		ForEachTableObject(FD.ReadField(obj, field), function(child)
+		FD.ForEachTableObject(FD.ReadField(obj, field), function(child)
 			if Deposit.IsDeposit(child) then
 				add_deposit(child)
 			end

@@ -80,6 +80,11 @@ local related_delete_fields = {
 	"unreachable_objects",
 }
 
+-- Request fields should be nil so delayed request cleanup does not index booleans.
+local request_fields = {
+	"repair_work_request",
+}
+
 -- Return whether a class name describes a rover-like unit.
 local function HasRoverClassName(class)
 	for _, class_name in ipairs(rover_classes) do
@@ -109,6 +114,10 @@ local function PrepareForDelete(rover)
 
 	for _, field in ipairs(related_delete_fields) do
 		FD.WriteField(rover, field, false)
+	end
+
+	for _, field in ipairs(request_fields) do
+		FD.WriteField(rover, field, nil)
 	end
 
 	FD.StopCommandNoDestructors(rover)

@@ -32,6 +32,10 @@ return {
 		'CodeFileName', "Code/fd_rover.lua",
 	}),
 	PlaceObj('ModItemCode', {
+		'name', "ForceDeleteTrain",
+		'CodeFileName', "Code/fd_train.lua",
+	}),
+	PlaceObj('ModItemCode', {
 		'name', "ForceDeleteRocket",
 		'CodeFileName', "Code/fd_rocket.lua",
 	}),

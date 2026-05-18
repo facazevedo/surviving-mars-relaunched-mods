@@ -49,7 +49,6 @@ local related_delete_fields = {
 	"target",
 	"goto_target",
 	"destination",
-	"transport_task",
 	"transport_request",
 	"request",
 	"resource_request",
@@ -63,9 +62,21 @@ local function FreeLandingSpot(container, shuttle)
 	end
 end
 
+-- Return whether a task looks like the colonist shuttle transport object.
+local function IsColonistTransportTask(task)
+	if type(task) ~= "table" and type(task) ~= "userdata" then
+		return false
+	end
+
+	return FD.ReadField(task, "source_dome") ~= nil
+		or FD.ReadField(task, "dest_dome") ~= nil
+		or FD.ReadField(task, "colonist") ~= nil
+end
+
 -- Clear a colonist transport task without letting it resume after deletion.
 local function ClearColonistTransportTask(shuttle, task)
 	local colonist = FD.ReadField(task, "colonist")
+	local is_current_task = FD.ReadField(shuttle, "transport_task") == task
 
 	FreeLandingSpot(FD.ReadField(task, "source_dome"), shuttle)
 	FreeLandingSpot(FD.ReadField(task, "dest_dome"), shuttle)
@@ -74,24 +85,29 @@ local function ClearColonistTransportTask(shuttle, task)
 		FD.WriteField(colonist, "transport_task", false)
 	end
 
-	if FD.ReadField(task, "shuttle") == shuttle then
+	-- Current shuttle commands may still read transport_task.state before the
+	-- command thread stops, so keep the task object and mark it finished.
+	FD.WriteField(task, "state", "done")
+
+	if not is_current_task and FD.ReadField(task, "shuttle") == shuttle then
 		FD.WriteField(task, "shuttle", false)
 	end
-
-	FD.CallObjectMethod(task, "Cleanup")
 end
 
 -- Clear shuttle transport state before related objects are deleted.
 local function PrepareForRelatedObjectDelete(shuttle)
 	local task = FD.ReadField(shuttle, "transport_task")
+	local keep_colonist_task = IsColonistTransportTask(task)
 
 	FD.CallObjectMethod(shuttle, "LandingEnd")
 	FD.CallObjectMethod(shuttle, "WaitingEnd")
 	FD.CallObjectMethod(shuttle, "ClearPath")
 	FD.CallObjectMethod(shuttle, "ClearRequests")
 
-	if type(task) == "table" or type(task) == "userdata" then
+	if keep_colonist_task then
 		ClearColonistTransportTask(shuttle, task)
+		keep_colonist_task = FD.ReadField(shuttle, "transport_task") == task
+			and FD.ReadField(shuttle, "is_colonist_transport_task") == true
 	end
 
 	FreeLandingSpot(FD.ReadField(shuttle, "dest_dome"), shuttle)
@@ -102,7 +118,12 @@ local function PrepareForRelatedObjectDelete(shuttle)
 
 	FD.WriteField(shuttle, "assigned_to_d_req", false)
 	FD.WriteField(shuttle, "assigned_to_s_req", false)
-	FD.WriteField(shuttle, "is_colonist_transport_task", false)
+
+	if not keep_colonist_task then
+		FD.WriteField(shuttle, "transport_task", false)
+		FD.WriteField(shuttle, "is_colonist_transport_task", false)
+	end
+
 	FD.WriteField(shuttle, "history_entry", false)
 	FD.WriteField(shuttle, "landing", false)
 	FD.WriteField(shuttle, "waiting", false)

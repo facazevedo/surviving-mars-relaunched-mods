@@ -17,6 +17,7 @@ return PlaceObj('ModDef', {
 		"Code/fd_animal.lua",
 		"Code/fd_shuttle.lua",
 		"Code/fd_rover.lua",
+		"Code/fd_train.lua",
 		"Code/fd_rocket.lua",
 		"Code/fd_deposit.lua",
 		"Code/fd_decoration.lua",

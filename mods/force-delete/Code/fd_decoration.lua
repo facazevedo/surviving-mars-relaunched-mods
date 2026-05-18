@@ -104,6 +104,7 @@ local excluded_class_parts = {
 	"Rover",
 	"Shuttle",
 	"Rocket",
+	"Train",
 	"Dome",
 	"Deposit",
 	"Marker",

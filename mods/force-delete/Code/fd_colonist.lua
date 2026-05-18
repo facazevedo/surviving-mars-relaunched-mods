@@ -133,13 +133,9 @@ local function ClearTransportTask(colonist)
 	local task = FD.ReadField(colonist, "transport_task")
 
 	if type(task) == "table" or type(task) == "userdata" then
-		local shuttle = FD.ReadField(task, "shuttle")
-
-		if FD.IsObjectValid(shuttle) and FD.ReadField(shuttle, "transport_task") == task then
-			FD.WriteField(shuttle, "transport_task", false)
-			FD.WriteField(shuttle, "is_colonist_transport_task", false)
-			FD.WriteField(shuttle, "dest_dome", false)
-		end
+		-- Leave the shuttle's current task object in place. CargoShuttle can
+		-- still be inside TransportColonist and indexes transport_task.state.
+		FD.WriteField(task, "state", "done")
 
 		if FD.ReadField(task, "colonist") == colonist then
 			FD.WriteField(task, "colonist", false)
