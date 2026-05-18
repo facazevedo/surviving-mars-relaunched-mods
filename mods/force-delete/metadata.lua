@@ -19,6 +19,7 @@ return PlaceObj('ModDef', {
 		"Code/fd_infrastructure.lua",
 		"Code/fd_internal_building.lua",
 		"Code/fd_external_building.lua",
+		"Code/fd_dome.lua",
 	},
 	'saved', 1778976137,
 	'code_hash', 3373162618529736939,

@@ -24,7 +24,11 @@ FD.Config.DEMOLISHABLE_OBJECT_LEVEL = 1
 FD.Config.NON_DEMOLISHABLE_OBJECT_LEVEL = 2
 
 -- Optional per-type overrides can pin a type to a specific level when needed.
-FD.Config.FORCE_DELETE_LEVELS = {}
+-- Domes are always Level 2 because passages and internal buildings must be
+-- staged before the dome itself, even when the dome is demolishable.
+FD.Config.FORCE_DELETE_LEVELS = {
+	dome = 2,
+}
 
 -- ============================================================================
 -- Config helpers

@@ -9,6 +9,7 @@ _G.ForceDelete = FD
 -- Shortcut ids are stable so repeated loads do not create incompatible actions.
 FD.LVL1_ACTION_ID = "ForceDelete_Level1_CtrlDelete"
 FD.LVL2_ACTION_ID = "ForceDelete_Level2_CtrlShiftDelete"
+FD.MAX_SCAN = FD.MAX_SCAN or 2048
 
 -- Common identity fields shown by object-specific inspector modules.
 FD.IDENTITY_FIELDS = { "name", "display_name", "handle", "id", "index", "Index" }
@@ -299,6 +300,16 @@ function FD.DeleteNonUnitObject(obj)
 	return FD.DemolishObjectNow(obj) or FD.DeleteObjectDirect(obj)
 end
 
+-- Run only the Level 1-style demolition stage for one non-unit object.
+function FD.Level1DemolishObject(obj)
+	return FD.DemolishObjectNow(obj)
+end
+
+-- Run only the Level 2-style direct deletion stage for one object.
+function FD.Level2DeleteObject(obj)
+	return FD.DeleteObjectDirect(obj)
+end
+
 -- Delete a named non-unit type and report a concise result message.
 function FD.DeleteNamedNonUnitObject(obj, is_supported, label, invalid_message)
 	if not is_supported then
@@ -495,6 +506,10 @@ function FD.ObjectType(obj)
 		return "shuttle"
 	end
 
+	if FD.Dome and FD.Dome.IsDome(obj) then
+		return "dome"
+	end
+
 	if FD.Infrastructure and FD.Infrastructure.IsInfrastructure(obj) then
 		return "infrastructure"
 	end
@@ -520,6 +535,8 @@ function FD.HandlerForType(object_type)
 		return FD.Animal
 	elseif object_type == "shuttle" then
 		return FD.Shuttle
+	elseif object_type == "dome" then
+		return FD.Dome
 	elseif object_type == "infrastructure" then
 		return FD.Infrastructure
 	elseif object_type == "internal_building" then

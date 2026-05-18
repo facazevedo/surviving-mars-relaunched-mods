@@ -39,4 +39,8 @@ return {
 		'name', "ForceDeleteExternalBuilding",
 		'CodeFileName', "Code/fd_external_building.lua",
 	}),
+	PlaceObj('ModItemCode', {
+		'name', "ForceDeleteDome",
+		'CodeFileName', "Code/fd_dome.lua",
+	}),
 }
