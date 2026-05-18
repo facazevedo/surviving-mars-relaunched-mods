@@ -12,7 +12,7 @@ FD.Config = FD.Config or {}
 -- ============================================================================
 
 -- Master switch for the bottom-right diagnostic panel.
-FD.Config.DISPLAY_ATTRIBUTES = true
+FD.Config.DISPLAY_ATTRIBUTES = false
 
 -- Attribute refresh speed while an object remains selected.
 FD.Config.ATTRIBUTE_REFRESH_INTERVAL_MS = 500

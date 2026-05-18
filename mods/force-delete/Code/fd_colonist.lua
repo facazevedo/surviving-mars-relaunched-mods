@@ -205,6 +205,15 @@ local function PrepareForRelatedObjectDelete(colonist)
 	EnsureValidPosition(colonist)
 end
 
+-- Start a fresh colonist idle command after stale command state is removed.
+local function RestartIdleCommand(colonist)
+	if IsDeadOrDying(colonist) or not HasValidPosition(colonist) then
+		return false
+	end
+
+	return FD.CallObjectMethod(colonist, "SetCommand", "Idle", "checked")
+end
+
 -- Return whether two objects are safely on the same map.
 local function IsSameMapSafe(left, right)
 	local is_same_map = FD.Global("IsSameMap")
@@ -304,6 +313,7 @@ function Colonist.IdleForRelatedObjectDelete(colonist)
 
 	PrepareForRelatedObjectDelete(colonist)
 	FD.StopCommandNoDestructors(colonist)
+	RestartIdleCommand(colonist)
 	return true
 end
 

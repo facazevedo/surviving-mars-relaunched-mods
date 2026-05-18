@@ -101,6 +101,17 @@ local request_fields = {
 	"maintenance_resource_request",
 }
 
+-- Unit lists can hold drones or rovers that still have rocket destructors.
+local unit_list_fields = {
+	"drones",
+	"drones_entering",
+	"drones_exiting",
+	"rovers",
+	"boarding",
+	"boarded",
+	"disembarking",
+}
+
 -- Return whether a class name belongs to a rocket helper object.
 local function HasExcludedClassName(class)
 	for _, text in ipairs(excluded_class_parts) do
@@ -130,6 +141,56 @@ local function ClearRequestFields(rocket)
 	end
 end
 
+-- Return a safe fallback position for units detached from a rocket.
+local function RocketFallbackPos(rocket)
+	return FD.CallMethod(rocket, "GetPos") or FD.ReadField(rocket, "pos")
+end
+
+-- Detach one rocket-owned unit without invoking rocket LeadOut destructors.
+local function DetachUnitFromRocket(unit, fallback_pos)
+	if not FD.IsObjectValid(unit) then
+		return
+	end
+
+	FD.StopCommandNoDestructors(unit)
+	FD.WriteField(unit, "holder", false)
+	FD.WriteField(unit, "building", false)
+	FD.WriteField(unit, "target", false)
+	FD.WriteField(unit, "goto_target", false)
+	FD.WriteField(unit, "d_request", nil)
+	FD.WriteField(unit, "s_request", nil)
+	FD.WriteField(unit, "w_request", nil)
+	FD.WriteField(unit, "picked_up_from_req", nil)
+
+	if fallback_pos and type(FD.ReadField(unit, "SetPos")) == "function" then
+		FD.CallObjectMethod(unit, "SetPos", fallback_pos)
+	end
+
+	FD.CallObjectMethod(unit, "SetHolder", false)
+	FD.CallObjectMethod(unit, "SetOutside", true)
+
+	if FD.Drone and FD.Drone.IsDrone(unit) then
+		FD.CallObjectMethod(unit, "SetCommand", "Idle")
+	end
+end
+
+-- Detach rocket-owned units before the rocket object is removed.
+local function DetachUnits(rocket)
+	local fallback_pos = RocketFallbackPos(rocket)
+	local seen = {}
+
+	for _, field in ipairs(unit_list_fields) do
+		for _, unit in ipairs(FD.ValidObjectsFromTable(FD.ReadField(rocket, field))) do
+			if not seen[unit] then
+				seen[unit] = true
+				DetachUnitFromRocket(unit, fallback_pos)
+			end
+		end
+
+		FD.WriteField(rocket, field, {})
+	end
+end
+
 -- Stop active rocket work before deletion so stale command callbacks do not run.
 local function PrepareForDelete(rocket)
 	FD.CallObjectMethod(rocket, "ForceInterruptIncomingDrones")
@@ -142,6 +203,7 @@ local function PrepareForDelete(rocket)
 	StopThreadField(rocket, "departure_thread")
 	FD.StopCommandNoDestructors(rocket)
 	ClearRequestFields(rocket)
+	DetachUnits(rocket)
 
 	FD.WriteField(rocket, "launch_after_unload", false)
 	FD.WriteField(rocket, "waiting_resources", false)
@@ -149,8 +211,6 @@ local function PrepareForDelete(rocket)
 	FD.WriteField(rocket, "auto_connect", false)
 	FD.WriteField(rocket, "landing_disabled", true)
 	FD.WriteField(rocket, "launch_disabled", true)
-	FD.WriteField(rocket, "drones_entering", {})
-	FD.WriteField(rocket, "drones_exiting", {})
 end
 
 -- Detect rockets and pods while excluding landing sites and pad helpers.
