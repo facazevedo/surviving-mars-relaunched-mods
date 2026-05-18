@@ -28,6 +28,10 @@ return {
 		'CodeFileName', "Code/fd_shuttle.lua",
 	}),
 	PlaceObj('ModItemCode', {
+		'name', "ForceDeleteDeposit",
+		'CodeFileName', "Code/fd_deposit.lua",
+	}),
+	PlaceObj('ModItemCode', {
 		'name', "ForceDeleteInfrastructure",
 		'CodeFileName', "Code/fd_infrastructure.lua",
 	}),

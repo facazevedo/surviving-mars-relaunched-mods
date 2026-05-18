@@ -24,6 +24,7 @@ FD.SUPPORTED_TYPES = {
 	{ object_type = "animal", module_name = "Animal", is_method = "IsAnimal" },
 	{ object_type = "shuttle", module_name = "Shuttle", is_method = "IsShuttle" },
 	{ object_type = "dome", module_name = "Dome", is_method = "IsDome" },
+	{ object_type = "deposit", module_name = "Deposit", is_method = "IsDeposit" },
 	{ object_type = "infrastructure", module_name = "Infrastructure", is_method = "IsInfrastructure" },
 	{ object_type = "internal_building", module_name = "InternalBuilding", is_method = "IsInternalBuilding" },
 	{ object_type = "external_building", module_name = "ExternalBuilding", is_method = "IsExternalBuilding" },

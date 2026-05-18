@@ -28,6 +28,7 @@ FD.Config.NON_DEMOLISHABLE_OBJECT_LEVEL = 2
 -- staged before the dome itself, even when the dome is demolishable.
 FD.Config.FORCE_DELETE_LEVELS = {
 	dome = 2,
+	deposit = 2,
 }
 
 -- ============================================================================
