@@ -41,6 +41,62 @@ local state_fields = {
 -- Method availability tells us which safe delete paths exist on this object.
 local methods = { "SetCommand", "DieNow", "delete" }
 
+-- Direct object fields that can keep a drone targeting an object about to be deleted.
+local delete_target_fields = {
+	"command_center",
+	"target",
+	"goto_target",
+	"fx_moving_target",
+	"rogue_target",
+	"holder",
+	"building",
+	"destination",
+}
+
+-- Request fields must be nil, not false, because request destructors index them.
+local delete_request_fields = {
+	"d_request",
+	"s_request",
+	"w_request",
+	"picked_up_from_req",
+	"request",
+	"resource_request",
+}
+
+-- Stop a drone command without letting stale destructors touch deleted objects.
+local function StopCommandNoDestructors(drone)
+	FD.WriteField(drone, "command_destructors", false)
+	FD.WriteField(drone, "command_queue", nil)
+	FD.WriteField(drone, "forced_cmd_importance", nil)
+
+	for _, thread in ipairs({
+		FD.ReadField(drone, "command_thread"),
+		FD.ReadField(drone, "thread_running_destructors"),
+	}) do
+		if FD.SafeCall(FD.Global("IsValidThread"), thread) then
+			FD.SafeCall(FD.Global("DeleteThread"), thread)
+		end
+	end
+
+	FD.WriteField(drone, "command_thread", nil)
+	FD.WriteField(drone, "thread_running_destructors", nil)
+	FD.WriteField(drone, "command", "Idle")
+end
+
+-- Clear target and request state before related objects are deleted.
+local function PrepareForRelatedObjectDelete(drone)
+	for _, field in ipairs(delete_target_fields) do
+		FD.WriteField(drone, field, false)
+	end
+
+	for _, field in ipairs(delete_request_fields) do
+		FD.WriteField(drone, field, nil)
+	end
+
+	FD.WriteField(drone, "resource", false)
+	FD.WriteField(drone, "amount", 0)
+end
+
 -- Detect mobile drones while excluding drone-related buildings.
 function Drone.IsDrone(obj)
 	if not FD.IsObjectValid(obj) then
@@ -67,6 +123,23 @@ function Drone.OnSelected(obj)
 	if FD.DisplayAttributes then
 		FD.DisplayAttributes.Show(Drone.GetRelevantAttributes(obj))
 	end
+end
+
+-- Detach a drone from doomed objects and ask it to stop current work.
+function Drone.IdleForRelatedObjectDelete(drone)
+	if not Drone.IsDrone(drone) then
+		return false
+	end
+
+	local commanded = FD.CallObjectMethod(drone, "SetCommand", "Idle")
+		or FD.CallObjectMethod(drone, "SetCommand", "Reset")
+
+	if not commanded then
+		StopCommandNoDestructors(drone)
+	end
+
+	PrepareForRelatedObjectDelete(drone)
+	return true
 end
 
 -- Delete a drone through the safest available game path.

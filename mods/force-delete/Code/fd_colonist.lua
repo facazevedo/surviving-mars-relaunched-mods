@@ -114,6 +114,16 @@ function Colonist.OnSelected(obj)
 	end
 end
 
+-- Detach a colonist from doomed objects and ask it to stop current work.
+function Colonist.IdleForRelatedObjectDelete(colonist)
+	if not Colonist.IsColonist(colonist) then
+		return false
+	end
+
+	PrepareForDelete(colonist)
+	return FD.CallObjectMethod(colonist, "SetCommand", "Idle")
+end
+
 -- Delete a colonist through the safest available game path.
 function Colonist.Delete(colonist)
 	if not Colonist.IsColonist(colonist) then

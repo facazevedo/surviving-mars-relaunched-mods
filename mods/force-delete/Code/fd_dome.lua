@@ -39,6 +39,55 @@ local passage_piece_fields = {
 	"end_el",
 }
 
+-- Fields that can keep colonists targeting a soon-deleted dome object.
+local colonist_reference_fields = {
+	"dome",
+	"workplace",
+	"residence",
+	"reserved_residence",
+	"assigned_to_service",
+	"emigration_dome",
+	"arriving",
+	"holder",
+	"building",
+	"target",
+	"goto_target",
+	"destination",
+	"passage",
+	"passage_obj",
+	"tunnel",
+	"entering_tunnel",
+	"leaving_tunnel",
+}
+
+-- Table fields that can keep colonists routing through a doomed object.
+local colonist_reference_table_fields = {
+	"transport_ticket",
+	"work_route",
+}
+
+-- Fields that can keep drones targeting a soon-deleted dome object.
+local drone_reference_fields = {
+	"command_center",
+	"target",
+	"goto_target",
+	"fx_moving_target",
+	"rogue_target",
+	"holder",
+	"building",
+	"destination",
+}
+
+-- Request fields that can indirectly point drones at soon-deleted objects.
+local drone_request_fields = {
+	"d_request",
+	"s_request",
+	"w_request",
+	"picked_up_from_req",
+	"request",
+	"resource_request",
+}
+
 -- Return whether a class name looks like a passage controller or element.
 local function HasPassageClassName(obj)
 	return FD.ClassName(obj):find("Passage", 1, true) ~= nil
@@ -65,6 +114,7 @@ local function AddUnique(list, seen, obj)
 end
 
 -- Visit object-like values in an engine table without scanning indefinitely.
+-- A callback may return true to stop the scan early.
 local function ForEachTableObject(list, callback)
 	if type(list) ~= "table" or type(callback) ~= "function" then
 		return
@@ -72,10 +122,13 @@ local function ForEachTableObject(list, callback)
 
 	local scanned = 0
 
+	-- Validate each candidate before handing it to caller-owned logic.
 	local function visit(obj)
 		if FD.IsObjectValid(obj) then
-			callback(obj)
+			return callback(obj) == true
 		end
+
+		return false
 	end
 
 	for _, obj in ipairs(list) do
@@ -84,7 +137,9 @@ local function ForEachTableObject(list, callback)
 			return
 		end
 
-		visit(obj)
+		if visit(obj) then
+			return
+		end
 	end
 
 	for key, value in pairs(list) do
@@ -93,9 +148,27 @@ local function ForEachTableObject(list, callback)
 			return
 		end
 
-		visit(key)
-		visit(value)
+		if visit(key) or visit(value) then
+			return
+		end
 	end
+end
+
+-- Count how many objects successfully complete one action.
+local function CountSuccessfulActions(objects, action)
+	if type(action) ~= "function" then
+		return 0
+	end
+
+	local count = 0
+
+	for _, obj in ipairs(objects or {}) do
+		if action(obj) then
+			count = count + 1
+		end
+	end
+
+	return count
 end
 
 -- Return whether an object directly references a selected dome.
@@ -367,30 +440,253 @@ function Dome.CollectInspectorInternalBuildings(dome)
 	return CollectInternalBuildings(dome, false)
 end
 
--- Run Level 1-style demolition on a collection.
-function Dome.DemolishObjects(objects)
-	local demolished = 0
+-- Add one valid object to a set used for target-reference checks.
+function Dome.AddTarget(targets, obj)
+	if FD.IsObjectValid(obj) then
+		targets[obj] = true
+	end
+end
 
-	for _, obj in ipairs(objects or {}) do
-		if FD.Level1DemolishObject(obj) then
-			demolished = demolished + 1
+-- Build the set of objects that units must stop targeting before deletion.
+function Dome.BuildDeletionTargetSet(dome, passages, internal_buildings)
+	local targets = {}
+
+	Dome.AddTarget(targets, dome)
+
+	for _, obj in ipairs(passages or {}) do
+		Dome.AddTarget(targets, obj)
+	end
+
+	for _, obj in ipairs(internal_buildings or {}) do
+		Dome.AddTarget(targets, obj)
+	end
+
+	return targets
+end
+
+-- Return whether an object belongs to the dome being deleted.
+function Dome.ObjectBelongsToDome(obj, dome)
+	return FD.IsObjectValid(obj)
+		and (
+			obj == dome
+			or FD.ReadField(obj, "dome") == dome
+			or FD.ReadField(obj, "parent_dome") == dome
+			or FD.ReadField(obj, "parent") == dome
+		)
+end
+
+-- Return whether one value points at a doomed dome object.
+function Dome.ValueTargetsDomeDelete(value, dome, targets)
+	if not FD.IsObjectValid(value) then
+		return false
+	end
+
+	if targets[value] or Dome.ObjectBelongsToDome(value, dome) then
+		return true
+	end
+
+	local passage = Dome.PassageControllerFor(value)
+	return passage and targets[passage] or false
+end
+
+-- Return whether any listed field points at a doomed dome object.
+function Dome.FieldsTargetDomeDelete(obj, fields, dome, targets)
+	for _, field in ipairs(fields or {}) do
+		if Dome.ValueTargetsDomeDelete(FD.ReadField(obj, field), dome, targets) then
+			return true
 		end
 	end
 
-	return demolished
+	return false
+end
+
+-- Return whether one table field contains a doomed dome object.
+function Dome.TableTargetsDomeDelete(list, dome, targets)
+	local found = false
+
+	ForEachTableObject(list, function(value)
+		if Dome.ValueTargetsDomeDelete(value, dome, targets) then
+			found = true
+			return true
+		end
+	end)
+
+	return found
+end
+
+-- Return whether any listed table field contains a doomed dome object.
+function Dome.TableFieldsTargetDomeDelete(obj, fields, dome, targets)
+	for _, field in ipairs(fields or {}) do
+		if Dome.TableTargetsDomeDelete(FD.ReadField(obj, field), dome, targets) then
+			return true
+		end
+	end
+
+	return false
+end
+
+-- Return whether a colonist is currently tied to the dome deletion target set.
+function Dome.ColonistTargetsDomeDelete(colonist, dome, targets)
+	if not FD.Colonist or not FD.Colonist.IsColonist(colonist) then
+		return false
+	end
+
+	return Dome.FieldsTargetDomeDelete(colonist, colonist_reference_fields, dome, targets)
+		or Dome.TableFieldsTargetDomeDelete(colonist, colonist_reference_table_fields, dome, targets)
+end
+
+-- Add affected objects from one container's label tables.
+function Dome.CollectAffectedObjectsFromContainer(container, matches, objects, seen)
+	if type(matches) ~= "function" then
+		return
+	end
+
+	local labels = FD.ReadField(container, "labels")
+	if type(labels) ~= "table" then
+		return
+	end
+
+	for _, label_list in pairs(labels) do
+		ForEachTableObject(label_list, function(obj)
+			local ok, is_match = pcall(matches, obj)
+
+			if ok and is_match then
+				AddUnique(objects, seen, obj)
+			end
+		end)
+	end
+end
+
+-- Return affected objects found in the dome and city/colony label tables.
+function Dome.CollectAffectedObjects(dome, passages, internal_buildings, matches)
+	if type(matches) ~= "function" then
+		return {}
+	end
+
+	local targets = Dome.BuildDeletionTargetSet(dome, passages, internal_buildings)
+	local objects = {}
+	local seen = {}
+	local seen_containers = {}
+	local function matches_target(obj)
+		return matches(obj, dome, targets)
+	end
+
+	for _, container in ipairs(CandidateContainers(dome)) do
+		if container and not seen_containers[container] then
+			seen_containers[container] = true
+			Dome.CollectAffectedObjectsFromContainer(container, matches_target, objects, seen)
+		end
+	end
+
+	Dome.CollectAffectedObjectsFromContainer(dome, matches_target, objects, seen)
+
+	return objects
+end
+
+-- Add affected colonists from one container's label tables.
+function Dome.CollectAffectedColonistsFromContainer(container, dome, targets, colonists, seen)
+	Dome.CollectAffectedObjectsFromContainer(container, function(obj)
+		return Dome.ColonistTargetsDomeDelete(obj, dome, targets)
+	end, colonists, seen)
+end
+
+-- Return colonists whose current command or assignment points at doomed objects.
+function Dome.CollectAffectedColonists(dome, passages, internal_buildings)
+	return Dome.CollectAffectedObjects(
+		dome,
+		passages,
+		internal_buildings,
+		Dome.ColonistTargetsDomeDelete
+	)
+end
+
+-- Detach and idle colonists before deleting the objects they target.
+function Dome.IdleAffectedColonists(dome, passages, internal_buildings)
+	return CountSuccessfulActions(
+		Dome.CollectAffectedColonists(dome, passages, internal_buildings),
+		function(colonist)
+			return FD.Colonist and FD.Colonist.IdleForRelatedObjectDelete(colonist)
+		end
+	)
+end
+
+-- Return the source object behind a drone request, when available.
+function Dome.DroneRequestSource(request, drone)
+	local get_source = FD.ReadField(request, "GetSource")
+	if type(get_source) ~= "function" then
+		return false
+	end
+
+	local ok, source = pcall(function()
+		return get_source(request, drone)
+	end)
+
+	return ok and source or false
+end
+
+-- Return whether one drone request points at a doomed dome object.
+function Dome.DroneRequestTargetsDomeDelete(drone, request, dome, targets)
+	if Dome.ValueTargetsDomeDelete(request, dome, targets) then
+		return true
+	end
+
+	return Dome.ValueTargetsDomeDelete(Dome.DroneRequestSource(request, drone), dome, targets)
+end
+
+-- Return whether a drone is currently tied to the dome deletion target set.
+function Dome.DroneTargetsDomeDelete(drone, dome, targets)
+	if not FD.Drone or not FD.Drone.IsDrone(drone) then
+		return false
+	end
+
+	if Dome.FieldsTargetDomeDelete(drone, drone_reference_fields, dome, targets) then
+		return true
+	end
+
+	for _, field in ipairs(drone_request_fields) do
+		if Dome.DroneRequestTargetsDomeDelete(drone, FD.ReadField(drone, field), dome, targets) then
+			return true
+		end
+	end
+
+	return false
+end
+
+-- Add affected drones from one container's label tables.
+function Dome.CollectAffectedDronesFromContainer(container, dome, targets, drones, seen)
+	Dome.CollectAffectedObjectsFromContainer(container, function(obj)
+		return Dome.DroneTargetsDomeDelete(obj, dome, targets)
+	end, drones, seen)
+end
+
+-- Return drones whose current command or request points at doomed objects.
+function Dome.CollectAffectedDrones(dome, passages, internal_buildings)
+	return Dome.CollectAffectedObjects(
+		dome,
+		passages,
+		internal_buildings,
+		Dome.DroneTargetsDomeDelete
+	)
+end
+
+-- Detach and idle drones before deleting the objects they target.
+function Dome.IdleAffectedDrones(dome, passages, internal_buildings)
+	return CountSuccessfulActions(
+		Dome.CollectAffectedDrones(dome, passages, internal_buildings),
+		function(drone)
+			return FD.Drone and FD.Drone.IdleForRelatedObjectDelete(drone)
+		end
+	)
+end
+
+-- Run Level 1-style demolition on a collection.
+function Dome.DemolishObjects(objects)
+	return CountSuccessfulActions(objects, FD.Level1DemolishObject)
 end
 
 -- Run Level 2-style direct deletion on a collection.
 function Dome.DeleteObjects(objects)
-	local deleted = 0
-
-	for _, obj in ipairs(objects or {}) do
-		if FD.Level2DeleteObject(obj) then
-			deleted = deleted + 1
-		end
-	end
-
-	return deleted
+	return CountSuccessfulActions(objects, FD.Level2DeleteObject)
 end
 
 -- Demolish one passage and direct-delete it only if demolition left it valid.
@@ -464,9 +760,11 @@ function Dome.Delete(dome)
 	local summary = FD.ObjectSummary(dome)
 	local passages = Dome.CollectConnectedPassageControllers(dome)
 	local passage_ids = Dome.PassageIds(passages)
+	local internal_buildings = Dome.CollectInternalBuildings(dome)
+	local idled_colonists = Dome.IdleAffectedColonists(dome, passages, internal_buildings)
+	local idled_drones = Dome.IdleAffectedDrones(dome, passages, internal_buildings)
 	local passage_demolished, passage_deleted = Dome.DeletePassagesSequentially(passages)
 	local passages_remaining = Dome.CountConnectedPassages(dome)
-	local internal_buildings = Dome.CollectInternalBuildings(dome)
 	local internal_demolished = Dome.DemolishObjects(internal_buildings)
 	local internal_deleted = Dome.DeleteObjects(internal_buildings)
 	local dome_demolished = FD.Level1DemolishObject(dome) and 1 or 0
@@ -478,6 +776,10 @@ function Dome.Delete(dome)
 			.. summary
 			.. "\nPassage ids: "
 			.. (passage_ids ~= "" and passage_ids or "none")
+			.. "\nColonists idled: "
+			.. FD.SafeToString(idled_colonists)
+			.. "\nDrones idled: "
+			.. FD.SafeToString(idled_drones)
 			.. "\nPassages demolished: "
 			.. FD.SafeToString(passage_demolished)
 			.. "\nPassages direct-deleted: "

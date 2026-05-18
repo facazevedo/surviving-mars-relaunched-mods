@@ -1,4 +1,4 @@
--- Force Delete diagnostic scaffold.
+-- Force Delete core.
 -- Shared helpers, selection dispatch, and diagnostic shortcut registration.
 
 -- Create the shared namespace used by all Force Delete modules.
@@ -298,6 +298,29 @@ end
 -- Delete one non-unit object through demolition first, then direct fallback.
 function FD.DeleteNonUnitObject(obj)
 	return FD.DemolishObjectNow(obj) or FD.DeleteObjectDirect(obj)
+end
+
+-- Guard engine request cleanup against stale boolean request references.
+function FD.PatchRequestUnassignUnit()
+	if FD.request_unassign_patched then
+		return true
+	end
+
+	local original = FD.Global("RequestUnassignUnit")
+	if type(original) ~= "function" then
+		return false
+	end
+
+	_G.RequestUnassignUnit = function(request, ...)
+		if type(FD.ReadField(request, "UnassignUnit")) ~= "function" then
+			return false
+		end
+
+		return original(request, ...)
+	end
+
+	FD.request_unassign_patched = true
+	return true
 end
 
 -- Run only the Level 1-style demolition stage for one non-unit object.
@@ -841,14 +864,17 @@ function FD.PatchGameShortcuts()
 	FD.shortcuts_patched = true
 end
 
--- Retry shortcut patching when classes/data are ready.
+-- Retry shortcut patching and engine guards when classes/data are ready.
 function FD.InstallShortcutHooks()
 	FD.ChainOnMsg("ClassesPostprocess", "force_delete_shortcuts", FD.PatchGameShortcuts)
 	FD.ChainOnMsg("DataLoaded", "force_delete_shortcuts", FD.PatchGameShortcuts)
+	FD.ChainOnMsg("ClassesPostprocess", "force_delete_request_guard", FD.PatchRequestUnassignUnit)
+	FD.ChainOnMsg("DataLoaded", "force_delete_request_guard", FD.PatchRequestUnassignUnit)
 end
 
 -- Install the startup hooks after every module has had a chance to load.
 FD.InstallSelectionHooks()
 FD.InstallShortcutHooks()
 FD.PatchGameShortcuts()
+FD.PatchRequestUnassignUnit()
 FD.StartAttributeRefreshMonitor()
