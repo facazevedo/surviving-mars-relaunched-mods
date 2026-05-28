@@ -76,6 +76,17 @@ config.WaterToolStepMeters = 1
 config.WaterToolSelectRadiusM = 25
 
 -- ============================================================================
+-- RAIN (UI buttons)
+-- ============================================================================
+-- DefaultRainPreset feeds Rivers.Rain.StartDisaster when called without an
+-- argument (i.e. from the UI button). Must match an Id in the engine's
+-- Presets.MapSettings.RainsDisaster table. Valid in vanilla:
+--   "Normal_VeryLow", "Normal_Low", "Normal_High"
+--   "Toxic_VeryLow", "Toxic_Low", "Toxic_High"
+-- "Normal_Low" is the mildest beneficial-soil option and is a sensible default.
+config.DefaultRainPreset = "Normal_Low"
+
+-- ============================================================================
 -- SAFETY
 -- ============================================================================
 -- The carve operation iterates SetHeightCircle calls along the path. If a path
@@ -90,7 +101,7 @@ config.MaxStepsPerSegment = 512     -- refuse path segments longer than this man
 -- ============================================================================
 -- DebugLogs gates all log output. Scoped flags (Debug<Scope>) can be set to
 -- false to silence one scope while DebugLogs stays on. Scopes emitted by this
--- mod: "Init", "Lifecycle", "API", "Terrain", "Water", "Tool", "UI".
+-- mod: "Init", "Lifecycle", "API", "Terrain", "Water", "Tool", "UI", "Rain".
 config.DebugLogs = true
 config.DebugInit = true
 config.DebugLifecycle = true
@@ -99,6 +110,7 @@ config.DebugTerrain = true
 config.DebugWater = true
 config.DebugTool = true
 config.DebugUi = true
+config.DebugRain = true
 
 -- ============================================================================
 -- Typed config view: Rivers.Config
@@ -137,6 +149,8 @@ C.DEFAULT_STEP_METERS = as_number(config.DefaultStepMeters, 15)
 
 C.DEMO_PATH_PERCENTS = config.DemoPathPercents
 
+C.DEFAULT_RAIN_PRESET = type(config.DefaultRainPreset) == "string" and config.DefaultRainPreset or "Normal_Low"
+
 C.WATER_TOOL_START_LEVEL_METERS = as_number(config.WaterToolStartLevelMeters, 5)
 C.WATER_TOOL_STEP_METERS = as_number(config.WaterToolStepMeters, 1)
 C.WATER_TOOL_SELECT_RADIUS_M = as_number(config.WaterToolSelectRadiusM, 25)
@@ -152,5 +166,6 @@ C.DEBUG_TERRAIN = as_bool(config.DebugTerrain)
 C.DEBUG_WATER = as_bool(config.DebugWater)
 C.DEBUG_TOOL = as_bool(config.DebugTool)
 C.DEBUG_UI = as_bool(config.DebugUi)
+C.DEBUG_RAIN = as_bool(config.DebugRain)
 
 Rivers.Config = C

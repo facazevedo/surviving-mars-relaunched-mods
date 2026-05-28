@@ -20,6 +20,10 @@ return {
 		'CodeFileName', "Code/r_water.lua",
 	}),
 	PlaceObj('ModItemCode', {
+		'name', "r_rain",
+		'CodeFileName', "Code/r_rain.lua",
+	}),
+	PlaceObj('ModItemCode', {
 		'name', "r_api",
 		'CodeFileName', "Code/r_api.lua",
 	}),

@@ -55,6 +55,13 @@ function Lifecycle.Disable()
 	if Rivers.UI and type(Rivers.UI.Hide) == "function" then
 		Rivers.UI.Hide()
 	end
+	-- Visual rain is a mod-owned scene-param override -- clear it so vanilla
+	-- weather rendering returns. The disaster (g_RainDisaster) is engine game
+	-- state and is intentionally left alone: the player can stop it via the UI
+	-- if they want it gone.
+	if Rivers.Rain and type(Rivers.Rain.StopVisual) == "function" then
+		Rivers.Rain.StopVisual()
+	end
 	if type(Rivers.ClearAll) == "function" then
 		Rivers.ClearAll()
 	end
@@ -69,6 +76,18 @@ function OnMsg.NewMapLoaded(map, mapdata)
 	if Rivers.UI and type(Rivers.UI.Show) == "function" then
 		Rivers.UI.Show()
 	end
+end
+
+-- OnMsg.LightmodelSetSceneParams fires every time the engine writes its scene
+-- params from the active lightmodel (time-of-day shifts, weather transitions,
+-- override pushes). We register after the engine's own handler in Lightmodel.lua
+-- so r_rain.lua can reapply its visual override AFTER the engine wrote the
+-- vanilla value. When the override flag is off, our hook is a no-op and the
+-- vanilla value stands.
+function OnMsg.LightmodelSetSceneParams(map, view, lm_buf, time, start_offset)
+	if Rivers.State.enabled ~= true then return end
+	if not Rivers.Rain or type(Rivers.Rain.OnLightmodelSetSceneParams) ~= "function" then return end
+	Rivers.Rain.OnLightmodelSetSceneParams(map, view, lm_buf, time, start_offset)
 end
 
 -- OnMsg.DoneMap: the engine has destroyed every map-owned object, including

@@ -1,15 +1,18 @@
--- Rivers -- right-side "Water Tool" panel.
+-- Rivers -- right-side panel hosting the water tool and the rain buttons.
 --
 -- Layout:
 --   ┌────────────────────────────┐
---   │      RIVERS WATER TOOL     │   <- title
+--   │           RIVERS           │   <- title
 --   ├────────────────────────────┤
 --   │  [ Activate Water Mode ]   │   <- toggle (changes label when active)
---   │                            │
 --   │  Water level: N m          │   <- current marker's level
 --   │  [ - ]            [ + ]    │   <- step buttons
---   │                            │
 --   │  [ Clear All Water ]       │
+--   │                            │
+--   │           RAIN             │   <- section label
+--   │  Rain: none                │   <- status (disaster preset / visual on)
+--   │  [ Start Rain ] [ Stop ]   │   <- disaster start/stop
+--   │  [ Visual On ] [ Off ]     │   <- visual override start/stop
 --   └────────────────────────────┘
 --
 -- Lifecycle:
@@ -76,6 +79,7 @@ local function destroy_panel()
 	Rivers.State.ui_panel = false
 	Rivers.State.ui_toggle_button = false
 	Rivers.State.ui_level_label = false
+	Rivers.State.ui_rain_label = false
 end
 
 local function update_toggle_visual()
@@ -102,9 +106,26 @@ local function update_level_label()
 	pcall(function() label:SetText(text) end)
 end
 
+local function update_rain_label()
+	local label = Rivers.State.ui_rain_label
+	if not is_window_alive(label) then return end
+	local Rain = Rivers.Rain
+	local parts = {}
+	local disaster = Rain and Rain.GetDisasterType() or nil
+	if disaster then
+		parts[#parts + 1] = "disaster=" .. tostring(disaster)
+	end
+	if Rain and Rain.IsVisualActive() then
+		parts[#parts + 1] = "visual=on"
+	end
+	local text = "Rain: " .. (#parts > 0 and table.concat(parts, ", ") or "none")
+	pcall(function() label:SetText(text) end)
+end
+
 function UI.Refresh()
 	update_toggle_visual()
 	update_level_label()
+	update_rain_label()
 end
 
 -- ----------------------------------------------------------------------------
@@ -180,7 +201,7 @@ function UI.Show()
 	}, parent)
 
 	x_label:new({
-		Text = "RIVERS WATER TOOL",
+		Text = "RIVERS",
 		Translate = false,
 		TextStyle = "ConsoleLog",
 		TextColor = TEXT_COLOR,
@@ -238,6 +259,68 @@ function UI.Show()
 		end
 		UI.Refresh()
 	end)
+
+	-- Rain section
+	x_label:new({
+		Text = "RAIN",
+		Translate = false,
+		TextStyle = "ConsoleLog",
+		TextColor = TEXT_COLOR,
+		HAlign = "stretch",
+		MinHeight = ROW_HEIGHT,
+		MaxHeight = ROW_HEIGHT,
+	}, panel)
+
+	local rain_label = x_label:new({
+		Text = "Rain: none",
+		Translate = false,
+		TextStyle = "ConsoleLog",
+		TextColor = TEXT_COLOR,
+		HAlign = "stretch",
+		MinHeight = ROW_HEIGHT,
+		MaxHeight = ROW_HEIGHT,
+	}, panel)
+	Rivers.State.ui_rain_label = rain_label
+
+	-- Disaster row: Start uses Rivers.Config.DEFAULT_RAIN_PRESET.
+	local disaster_row = x_window:new({
+		Id = "RiversRainDisasterRow",
+		LayoutMethod = "HList",
+		LayoutHSpacing = 8,
+		HAlign = "stretch",
+		MinWidth = 220,
+		MaxWidth = 260,
+	}, panel)
+
+	make_button(disaster_row, "Start Rain", function()
+		if Rivers.Rain then Rivers.Rain.StartDisaster() end
+		UI.Refresh()
+	end, { halign = "stretch", min_width = 100, max_width = 120 })
+
+	make_button(disaster_row, "Stop Rain", function()
+		if Rivers.Rain then Rivers.Rain.StopDisaster() end
+		UI.Refresh()
+	end, { halign = "stretch", min_width = 100, max_width = 120 })
+
+	-- Visual row: cosmetic-only override.
+	local visual_row = x_window:new({
+		Id = "RiversRainVisualRow",
+		LayoutMethod = "HList",
+		LayoutHSpacing = 8,
+		HAlign = "stretch",
+		MinWidth = 220,
+		MaxWidth = 260,
+	}, panel)
+
+	make_button(visual_row, "Visual On", function()
+		if Rivers.Rain then Rivers.Rain.StartVisual() end
+		UI.Refresh()
+	end, { halign = "stretch", min_width = 100, max_width = 120 })
+
+	make_button(visual_row, "Visual Off", function()
+		if Rivers.Rain then Rivers.Rain.StopVisual() end
+		UI.Refresh()
+	end, { halign = "stretch", min_width = 100, max_width = 120 })
 
 	Rivers.State.ui_panel = panel
 	UI.Refresh()
