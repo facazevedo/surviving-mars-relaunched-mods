@@ -191,6 +191,9 @@ function Budget.SetLevel(seg_id, level_m)
 	local Water = Rivers.Water
 	if Water and type(Water.SetMarkerLevel) == "function" and seg.water_obj then
 		local new_water_z = (seg.floor_wu or 0) + meters_to_wu(v)
+		-- A direct SetLevel snaps exactly to the requested level, and resets the
+		-- tick gate's baseline so the next tick measures drift from here.
+		seg.applied_level_m = v
 		Water.SetMarkerLevel(map, seg.water_obj, new_water_z)
 	end
 
@@ -259,17 +262,34 @@ local function tick_segment(map, seg, dt_s, cfg)
 	seg.volume_m3 = new_volume
 	seg.actual_level_m = new_level_m
 
-	-- Re-run the connected flood-fill with the new level so next tick's loss
-	-- calculation uses up-to-date areas. Skip if Flood module isn't loaded.
-	if Rivers.Flood and type(Rivers.Flood.RecomputeSegment) == "function" then
-		Rivers.Flood.RecomputeSegment(map, seg)
-	end
-
-	-- Push the level back to the engine water marker.
-	local Water = Rivers.Water
-	if Water and type(Water.SetMarkerLevel) == "function" then
-		local new_water_z = (seg.floor_wu or 0) + meters_to_wu(new_level_m)
-		Water.SetMarkerLevel(map, seg.water_obj, new_water_z)
+	-- PERFORMANCE GATE. The flood-fill (a BFS over up to FLOOD_MAX_TILES tiles,
+	-- one terrain.GetHeight each) and the engine water-grid rebuild
+	-- (SetMarkerLevel -> UpdateGridAndVisuals + ApplyAllWaterObjects) are by far
+	-- the most expensive things this tick does. Running them every second is
+	-- what caused the in-game lag. We only do the heavy work once the level has
+	-- drifted at least HYDRO_APPLY_STEP_M meters since we last applied it, so a
+	-- filling/draining pool updates in discrete steps (default 1 m) rather than
+	-- every tick. The displayed field still updates smoothly (it reads
+	-- actual_level_m); only the visual water + flood recompute are stepped.
+	local apply_step = cfg.HYDRO_APPLY_STEP_M or 1.0
+	local last_applied = seg.applied_level_m
+	local drift = last_applied and (new_level_m - last_applied) or nil
+	if drift and drift < 0 then drift = -drift end
+	-- Always apply on the first tick (no baseline yet) and when the pool fully
+	-- drains to 0 (so the water visually disappears even on a sub-step change).
+	local must_apply = (last_applied == nil)
+		or (drift and drift >= apply_step)
+		or (new_level_m <= 0 and (last_applied or 0) > 0)
+	if must_apply then
+		seg.applied_level_m = new_level_m
+		if Rivers.Flood and type(Rivers.Flood.RecomputeSegment) == "function" then
+			Rivers.Flood.RecomputeSegment(map, seg)
+		end
+		local Water = Rivers.Water
+		if Water and type(Water.SetMarkerLevel) == "function" then
+			local new_water_z = (seg.floor_wu or 0) + meters_to_wu(new_level_m)
+			Water.SetMarkerLevel(map, seg.water_obj, new_water_z)
+		end
 	end
 
 	if cfg.DEBUG_BUDGET == true then

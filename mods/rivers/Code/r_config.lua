@@ -121,6 +121,9 @@ config.HydroOutflowMaxM3S = 100             -- soft cap on the outflow input fie
 config.HydroInitialOutflowM3S = 0           -- outflow of a freshly created segment
 config.HydroLevelStepMeters = 0.5           -- height + / - step (m), bypasses the budget
 config.HydroLevelMaxMeters = 50             -- soft cap on the height input field
+config.HydroApplyStepMeters = 1.0           -- min level change (m) before the budget tick
+                                            -- rebuilds the water grid (perf gate; bigger =
+                                            -- less lag, coarser visual stepping)
 config.HydroButtonRepeatStartMs = 300       -- delay before a held +/- button starts auto-firing
 config.HydroButtonRepeatIntervalMs = 150    -- gap between subsequent fires while held
 config.HydroEvaporationMPerSec = 0.00005    -- meters lost per second per m^2 of surface
@@ -227,6 +230,7 @@ C.HYDRO_OUTFLOW_MAX_M3S = as_number(config.HydroOutflowMaxM3S, 100)
 C.HYDRO_INITIAL_OUTFLOW_M3S = as_number(config.HydroInitialOutflowM3S, 0)
 C.HYDRO_LEVEL_STEP_M = as_number(config.HydroLevelStepMeters, 0.5)
 C.HYDRO_LEVEL_MAX_M = as_number(config.HydroLevelMaxMeters, 50)
+C.HYDRO_APPLY_STEP_M = as_number(config.HydroApplyStepMeters, 1.0)
 C.HYDRO_BUTTON_REPEAT_START_MS = as_number(config.HydroButtonRepeatStartMs, 300)
 C.HYDRO_BUTTON_REPEAT_INTERVAL_MS = as_number(config.HydroButtonRepeatIntervalMs, 150)
 C.HYDRO_EVAPORATION_M_PER_SEC = as_number(config.HydroEvaporationMPerSec, 0.00005)

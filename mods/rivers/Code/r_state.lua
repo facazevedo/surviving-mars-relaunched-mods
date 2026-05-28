@@ -34,6 +34,10 @@
 --     outflow_m3s       = number,              -- player-controlled drain (always applied)
 --     volume_m3         = number,              -- accumulating water held in basin + spill
 --     actual_level_m    = number,              -- meters above floor; what the marker reflects
+--     applied_level_m   = number,              -- last level (m) pushed to the engine; the
+--                                              --   budget tick skips the flood-fill + grid
+--                                              --   rebuild until the level drifts at least
+--                                              --   HYDRO_APPLY_STEP_M from this (perf gate)
 --
 --     -- flood-fill cache (set by r_flood.lua each tick)
 --     flooded_tile_count = int,
