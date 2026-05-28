@@ -32,9 +32,11 @@
 --     spill_wu          = int,                 -- bowl rim height (world units), == carve baseline
 --     bowl_area_wu2     = int,                 -- estimated bowl floor area (world units^2)
 --
---     -- water budget (driven by r_budget.lua)
---     discharge_m3s     = number,              -- player-controlled inflow
---     outflow_m3s       = number,              -- player-controlled drain (always applied)
+--     -- water budget (driven by r_budget.lua) -- all four rates are m^3/s
+--     discharge_m3s     = number,              -- player-controlled inflow (adds)
+--     drainage_m3s      = number,              -- player-controlled drain (removes)
+--     evaporation_m3s   = number,              -- player-controlled evaporation loss (removes)
+--     infiltration_m3s  = number,              -- player-controlled infiltration loss (removes)
 --     volume_m3         = number,              -- accumulating water held in basin + spill
 --     actual_level_m    = number,              -- meters above floor; what the marker reflects
 --     applied_level_m   = number,              -- last level (m) pushed to the engine; the

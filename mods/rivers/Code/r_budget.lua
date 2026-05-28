@@ -102,58 +102,52 @@ end
 -- Discharge controls (the "+ / -" buttons go through these)
 -- ----------------------------------------------------------------------------
 
-function Budget.SetDischarge(seg_id, value_m3s)
+-- The four budget rates (inflow/drainage/evaporation/infiltration) are all
+-- per-segment m^3/s values clamped to >= 0. set_rate / adjust_rate factor out
+-- the shared logic so each public Set*/Adjust* is a one-line wrapper naming the
+-- segment field it owns.
+local function set_rate(seg_id, field, value_m3s, label)
 	local seg = Rivers.State.segments[seg_id]
 	if not seg then
 		return nil, "no such segment: " .. tostring(seg_id)
 	end
 	local v = tonumber(value_m3s) or 0
 	if v < 0 then v = 0 end
-	seg.discharge_m3s = v
+	seg[field] = v
 	if config().DEBUG_BUDGET == true then
-		DebugLog.Info(SCOPE, "set discharge", { id = seg_id, value = v })
+		DebugLog.Info(SCOPE, "set " .. label, { id = seg_id, value = v })
 	end
 	return v
 end
 
-function Budget.AdjustDischarge(seg_id, delta_m3s)
+local function adjust_rate(seg_id, field, delta_m3s, set_fn)
 	local seg = Rivers.State.segments[seg_id]
 	if not seg then
 		return nil, "no such segment: " .. tostring(seg_id)
 	end
-	local prev = seg.discharge_m3s or 0
-	return Budget.SetDischarge(seg_id, prev + (tonumber(delta_m3s) or 0))
+	return set_fn(seg_id, (seg[field] or 0) + (tonumber(delta_m3s) or 0))
 end
 
-function Budget.SetOutflow(seg_id, value_m3s)
-	local seg = Rivers.State.segments[seg_id]
-	if not seg then
-		return nil, "no such segment: " .. tostring(seg_id)
-	end
-	local v = tonumber(value_m3s) or 0
-	if v < 0 then v = 0 end
-	seg.outflow_m3s = v
-	if config().DEBUG_BUDGET == true then
-		DebugLog.Info(SCOPE, "set outflow", { id = seg_id, value = v })
-	end
-	return v
-end
+function Budget.SetDischarge(seg_id, v) return set_rate(seg_id, "discharge_m3s", v, "discharge") end
+function Budget.AdjustDischarge(seg_id, d) return adjust_rate(seg_id, "discharge_m3s", d, Budget.SetDischarge) end
 
-function Budget.AdjustOutflow(seg_id, delta_m3s)
-	local seg = Rivers.State.segments[seg_id]
-	if not seg then
-		return nil, "no such segment: " .. tostring(seg_id)
-	end
-	local prev = seg.outflow_m3s or 0
-	return Budget.SetOutflow(seg_id, prev + (tonumber(delta_m3s) or 0))
-end
+function Budget.SetDrainage(seg_id, v) return set_rate(seg_id, "drainage_m3s", v, "drainage") end
+function Budget.AdjustDrainage(seg_id, d) return adjust_rate(seg_id, "drainage_m3s", d, Budget.SetDrainage) end
+
+function Budget.SetEvaporation(seg_id, v) return set_rate(seg_id, "evaporation_m3s", v, "evaporation") end
+function Budget.AdjustEvaporation(seg_id, d) return adjust_rate(seg_id, "evaporation_m3s", d, Budget.SetEvaporation) end
+
+function Budget.SetInfiltration(seg_id, v) return set_rate(seg_id, "infiltration_m3s", v, "infiltration") end
+function Budget.AdjustInfiltration(seg_id, d) return adjust_rate(seg_id, "infiltration_m3s", d, Budget.SetInfiltration) end
 
 function Budget.Get(seg_id)
 	local seg = Rivers.State.segments[seg_id]
 	if not seg then return nil end
 	return {
 		discharge_m3s = seg.discharge_m3s or 0,
-		outflow_m3s = seg.outflow_m3s or 0,
+		drainage_m3s = seg.drainage_m3s or 0,
+		evaporation_m3s = seg.evaporation_m3s or 0,
+		infiltration_m3s = seg.infiltration_m3s or 0,
 		volume_m3 = seg.volume_m3 or 0,
 		actual_level_m = seg.actual_level_m or 0,
 		flooded_tile_count = seg.flooded_tile_count or 0,
@@ -249,32 +243,21 @@ local function update_segment_volume(seg, dt_s, cfg)
 	end
 
 	local volume = seg.volume_m3 or 0
-	local discharge = seg.discharge_m3s or 0
 	local bowl_area_wu2 = seg.bowl_area_wu2 or 0
 	-- Convert wu^2 areas to m^2 once. guim is wu/m, so wu^2 -> m^2 divides by guim^2.
 	local bowl_area_m2 = bowl_area_wu2 / (guim * guim)
-	local surface_area_wu2 = seg.surface_area_wu2 or 0
-	local surface_area_m2 = surface_area_wu2 / (guim * guim)
-	local flooded_area_m2 = (seg.flooded_area_wu2 or 0) / (guim * guim)
+	local surface_area_m2 = (seg.surface_area_wu2 or 0) / (guim * guim)
 
-	local evap_rate = cfg.HYDRO_EVAPORATION_M_PER_SEC or 0
-	local infil_rate = cfg.HYDRO_INFILTRATION_M_PER_SEC or 0
-	local outflow = seg.outflow_m3s or 0
+	-- All four budget terms are flat per-segment rates in m^3/s: inflow adds,
+	-- the other three remove. (Earlier builds scaled evaporation/infiltration by
+	-- water surface area; they are now direct player-controlled fields like
+	-- inflow/drainage, so the math is a simple sum of rates.)
+	local inflow_m3 = (seg.discharge_m3s or 0) * dt_s
+	local drainage_m3 = (seg.drainage_m3s or 0) * dt_s
+	local evaporation_m3 = (seg.evaporation_m3s or 0) * dt_s
+	local infiltration_m3 = (seg.infiltration_m3s or 0) * dt_s
 
-	-- Inflow.
-	local inflow_m3 = discharge * dt_s
-
-	-- Losses. Outflow is the player-controlled drain and always applies (it's
-	-- water leaving the system regardless of level). Evaporation acts on the
-	-- visible water surface; infiltration on whatever area is wet (approximated
-	-- by bowl_area when no spill has been computed yet).
-	local effective_surface_m2 = surface_area_m2 > 0 and surface_area_m2 or bowl_area_m2
-	local effective_flooded_m2 = flooded_area_m2 > 0 and flooded_area_m2 or bowl_area_m2
-	local outflow_m3 = outflow * dt_s
-	local evap_loss_m3 = evap_rate * effective_surface_m2 * dt_s
-	local infil_loss_m3 = infil_rate * effective_flooded_m2 * dt_s
-
-	local new_volume = volume + inflow_m3 - outflow_m3 - evap_loss_m3 - infil_loss_m3
+	local new_volume = volume + inflow_m3 - drainage_m3 - evaporation_m3 - infiltration_m3
 	if new_volume < 0 then new_volume = 0 end
 
 	local new_level_m = level_from_volume(seg, new_volume, bowl_area_m2, surface_area_m2)
@@ -286,8 +269,8 @@ local function update_segment_volume(seg, dt_s, cfg)
 	if cfg.DEBUG_BUDGET == true then
 		DebugLog.Info(SCOPE, "tick", {
 			inflow_m3 = inflow_m3,
-			outflow_m3 = outflow_m3,
-			loss_m3 = evap_loss_m3 + infil_loss_m3,
+			drainage_m3 = drainage_m3,
+			loss_m3 = evaporation_m3 + infiltration_m3,
 			volume_m3 = new_volume,
 			level_m = new_level_m,
 			flooded_tiles = seg.flooded_tile_count or 0,

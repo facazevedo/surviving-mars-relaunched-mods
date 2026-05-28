@@ -140,9 +140,6 @@ local function place_or_select_at(click_pt)
 	local bowl_area_wu2 = (2 * radius_wu) * (2 * radius_wu)
 	local bowl_area_m2 = bowl_area_wu2 / (guim * guim)
 	local initial_volume_m3 = bowl_area_m2 * start_level_m
-	local initial_discharge = cfg.HYDRO_INITIAL_DISCHARGE_M3S or 0
-	local initial_outflow = cfg.HYDRO_INITIAL_OUTFLOW_M3S or 0
-
 	local id = Rivers.State:RegisterSegment({
 		water_obj = obj,
 		bbox = bbox,
@@ -151,8 +148,10 @@ local function place_or_select_at(click_pt)
 		marker_y = click_pt:y(),
 		spill_level_m = start_level_m,
 		bowl_area_wu2 = bowl_area_wu2,
-		discharge_m3s = initial_discharge,
-		outflow_m3s = initial_outflow,
+		discharge_m3s = cfg.HYDRO_INITIAL_DISCHARGE_M3S or 0,
+		drainage_m3s = cfg.HYDRO_INITIAL_DRAINAGE_M3S or 0,
+		evaporation_m3s = cfg.HYDRO_INITIAL_EVAPORATION_M3S or 0,
+		infiltration_m3s = cfg.HYDRO_INITIAL_INFILTRATION_M3S or 0,
 		volume_m3 = initial_volume_m3,
 		actual_level_m = start_level_m,
 		flooded_tile_count = 0,
@@ -163,7 +162,6 @@ local function place_or_select_at(click_pt)
 	DebugLog.Info(SCOPE, "placed new marker", {
 		id = id,
 		level_m = start_level_m,
-		discharge_m3s = initial_discharge,
 		x = click_pt:x(),
 		y = click_pt:y(),
 	})
@@ -186,29 +184,23 @@ end
 -- + / - adjustments on the most-recent marker
 -- ----------------------------------------------------------------------------
 
-function Tool.GetCurrentDischarge()
+-- Read a numeric field off the current segment, or nil if there's no current
+-- marker. Used by the UI to populate the live input fields + readouts.
+local function get_current_field(field)
 	local seg_id = Rivers.State.current_marker_segment
 	if not seg_id then return nil end
 	local seg = Rivers.State.segments[seg_id]
 	if not seg then return nil end
-	return seg.discharge_m3s or 0
+	return seg[field] or 0
 end
 
-function Tool.GetCurrentOutflow()
-	local seg_id = Rivers.State.current_marker_segment
-	if not seg_id then return nil end
-	local seg = Rivers.State.segments[seg_id]
-	if not seg then return nil end
-	return seg.outflow_m3s or 0
-end
-
-function Tool.GetCurrentLevel()
-	local seg_id = Rivers.State.current_marker_segment
-	if not seg_id then return nil end
-	local seg = Rivers.State.segments[seg_id]
-	if not seg then return nil end
-	return seg.actual_level_m or 0
-end
+function Tool.GetCurrentDischarge() return get_current_field("discharge_m3s") end
+function Tool.GetCurrentDrainage() return get_current_field("drainage_m3s") end
+function Tool.GetCurrentEvaporation() return get_current_field("evaporation_m3s") end
+function Tool.GetCurrentInfiltration() return get_current_field("infiltration_m3s") end
+function Tool.GetCurrentLevel() return get_current_field("actual_level_m") end
+function Tool.GetCurrentVolume() return get_current_field("volume_m3") end
+function Tool.GetCurrentFloodedAreaWu2() return get_current_field("flooded_area_wu2") end
 
 function Tool.GetCurrentDepthClass()
 	local seg_id = Rivers.State.current_marker_segment
@@ -218,9 +210,12 @@ function Tool.GetCurrentDepthClass()
 	return Rivers.Depth.Classify(seg.actual_level_m or 0)
 end
 
--- The +/- buttons now adjust source discharge (m^3/s). The actual water level
--- is driven by the budget ticker, not by this call.
-function Tool.AdjustDischarge(delta_m3s)
+-- Route a Budget setter/adjuster to the current segment. All the field controls
+-- (inflow/drainage/evaporation/infiltration discharge rates AND the instant
+-- height level) share this: validate there's a live marker, then call the named
+-- Rivers.Budget function with (seg_id, value). The budget ticker drives the
+-- actual water level from the rates; SetLevel/AdjustLevel snap it instantly.
+local function route(budget_fn_name, value)
 	local seg_id = Rivers.State.current_marker_segment
 	if not seg_id then
 		return nil, "no current marker (click a hole first)"
@@ -230,99 +225,23 @@ function Tool.AdjustDischarge(delta_m3s)
 		clear_current()
 		return nil, "current marker is gone"
 	end
-	if not Rivers.Budget or type(Rivers.Budget.AdjustDischarge) ~= "function" then
+	local fn = Rivers.Budget and Rivers.Budget[budget_fn_name]
+	if type(fn) ~= "function" then
 		return nil, "Rivers.Budget module not loaded"
 	end
-	return Rivers.Budget.AdjustDischarge(seg_id, delta_m3s or 0)
+	return fn(seg_id, value or 0)
 end
 
--- Used by the UI Apply button to push the flow input value through to the
--- current source. value_m3s is clamped to >= 0 by Budget.SetDischarge.
-function Tool.SetDischarge(value_m3s)
-	local seg_id = Rivers.State.current_marker_segment
-	if not seg_id then
-		return nil, "no current marker (click a hole first)"
-	end
-	local seg = Rivers.State.segments[seg_id]
-	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
-		clear_current()
-		return nil, "current marker is gone"
-	end
-	if not Rivers.Budget or type(Rivers.Budget.SetDischarge) ~= "function" then
-		return nil, "Rivers.Budget module not loaded"
-	end
-	return Rivers.Budget.SetDischarge(seg_id, value_m3s or 0)
-end
-
--- Outflow-row +/- buttons and the Apply button route here. value_m3s is the
--- drain rate; clamped to >= 0 by Budget.SetOutflow.
-function Tool.SetOutflow(value_m3s)
-	local seg_id = Rivers.State.current_marker_segment
-	if not seg_id then
-		return nil, "no current marker (click a hole first)"
-	end
-	local seg = Rivers.State.segments[seg_id]
-	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
-		clear_current()
-		return nil, "current marker is gone"
-	end
-	if not Rivers.Budget or type(Rivers.Budget.SetOutflow) ~= "function" then
-		return nil, "Rivers.Budget module not loaded"
-	end
-	return Rivers.Budget.SetOutflow(seg_id, value_m3s or 0)
-end
-
-function Tool.AdjustOutflow(delta_m3s)
-	local seg_id = Rivers.State.current_marker_segment
-	if not seg_id then
-		return nil, "no current marker (click a hole first)"
-	end
-	local seg = Rivers.State.segments[seg_id]
-	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
-		clear_current()
-		return nil, "current marker is gone"
-	end
-	if not Rivers.Budget or type(Rivers.Budget.AdjustOutflow) ~= "function" then
-		return nil, "Rivers.Budget module not loaded"
-	end
-	return Rivers.Budget.AdjustOutflow(seg_id, delta_m3s or 0)
-end
-
--- The height-row +/- buttons and the Apply button both flow through here.
--- This is an INSTANT level snap (Budget.SetLevel inverts volume-from-level
--- and pushes the engine marker immediately); the regular budget tick then
--- continues from the new volume.
-function Tool.SetLevel(level_m)
-	local seg_id = Rivers.State.current_marker_segment
-	if not seg_id then
-		return nil, "no current marker (click a hole first)"
-	end
-	local seg = Rivers.State.segments[seg_id]
-	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
-		clear_current()
-		return nil, "current marker is gone"
-	end
-	if not Rivers.Budget or type(Rivers.Budget.SetLevel) ~= "function" then
-		return nil, "Rivers.Budget module not loaded"
-	end
-	return Rivers.Budget.SetLevel(seg_id, level_m or 0)
-end
-
-function Tool.AdjustLevel(delta_m)
-	local seg_id = Rivers.State.current_marker_segment
-	if not seg_id then
-		return nil, "no current marker (click a hole first)"
-	end
-	local seg = Rivers.State.segments[seg_id]
-	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
-		clear_current()
-		return nil, "current marker is gone"
-	end
-	if not Rivers.Budget or type(Rivers.Budget.AdjustLevel) ~= "function" then
-		return nil, "Rivers.Budget module not loaded"
-	end
-	return Rivers.Budget.AdjustLevel(seg_id, delta_m or 0)
-end
+function Tool.SetDischarge(v) return route("SetDischarge", v) end
+function Tool.AdjustDischarge(d) return route("AdjustDischarge", d) end
+function Tool.SetDrainage(v) return route("SetDrainage", v) end
+function Tool.AdjustDrainage(d) return route("AdjustDrainage", d) end
+function Tool.SetEvaporation(v) return route("SetEvaporation", v) end
+function Tool.AdjustEvaporation(d) return route("AdjustEvaporation", d) end
+function Tool.SetInfiltration(v) return route("SetInfiltration", v) end
+function Tool.AdjustInfiltration(d) return route("AdjustInfiltration", d) end
+function Tool.SetLevel(v) return route("SetLevel", v) end
+function Tool.AdjustLevel(d) return route("AdjustLevel", d) end
 
 -- ----------------------------------------------------------------------------
 -- Overlay (only exists while tool is active)

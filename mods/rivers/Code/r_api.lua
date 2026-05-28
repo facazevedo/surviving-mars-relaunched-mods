@@ -117,8 +117,6 @@ function Rivers.Create(path, params)
 	local bowl_area_wu2 = (bx1 - bx0) * (by1 - by0)
 	local bowl_area_m2 = bowl_area_wu2 / (guim * guim)
 	local initial_volume_m3 = bowl_area_m2 * water_level_m
-	local initial_discharge = cfg.HYDRO_INITIAL_DISCHARGE_M3S or 0
-	local initial_outflow = cfg.HYDRO_INITIAL_OUTFLOW_M3S or 0
 
 	local id = Rivers.State:RegisterSegment({
 		water_obj = obj,
@@ -128,8 +126,10 @@ function Rivers.Create(path, params)
 		marker_y = marker_pt:y(),
 		spill_level_m = depth_m,
 		bowl_area_wu2 = bowl_area_wu2,
-		discharge_m3s = initial_discharge,
-		outflow_m3s = initial_outflow,
+		discharge_m3s = cfg.HYDRO_INITIAL_DISCHARGE_M3S or 0,
+		drainage_m3s = cfg.HYDRO_INITIAL_DRAINAGE_M3S or 0,
+		evaporation_m3s = cfg.HYDRO_INITIAL_EVAPORATION_M3S or 0,
+		infiltration_m3s = cfg.HYDRO_INITIAL_INFILTRATION_M3S or 0,
 		volume_m3 = initial_volume_m3,
 		actual_level_m = water_level_m,
 		flooded_tile_count = 0,
@@ -142,7 +142,6 @@ function Rivers.Create(path, params)
 		floor_wu = floor_wu,
 		water_level_m = water_level_m,
 		spill_level_m = depth_m,
-		discharge_m3s = initial_discharge,
 	})
 	return id
 end

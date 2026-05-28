@@ -5,11 +5,15 @@
 --   │           RIVERS           │   <- title
 --   ├────────────────────────────┤
 --   │  [ Activate Water Mode ]   │   <- toggle (changes label when active)
---   │  shallow | flooded N tiles │   <- status: depth class + flooded tile count
+--   │  source depth: shallow     │   <- status: depth class at the source
 --   │  height (lvl): [__] [-][+] │   <- instant water level in m (live)
---   │  inflow:  [__]      [-][+] │   <- source discharge in m^3/s (live)
---   │  outflow: [__]      [-][+] │   <- drain in m^3/s (live)
---   │  [ Apply ] [ Clear All ]   │   <- Apply commits all three typed values
+--   │  inflow:       [__] [-][+] │   <- source discharge in m^3/s (live)
+--   │  drainage:     [__] [-][+] │   <- player drain in m^3/s (live)
+--   │  evaporation:  [__] [-][+] │   <- evaporation loss in m^3/s (live)
+--   │  infiltration: [__] [-][+] │   <- infiltration loss in m^3/s (live)
+--   │  volume:  N m^3             │   <- read-only live volume
+--   │  surface: N m^2             │   <- read-only live water surface area
+--   │  [ Apply ] [ Clear All ]   │   <- Apply commits all typed field values
 --   │                            │
 --   │           RAIN             │   <- section label
 --   │  Rain: none                │   <- status (disaster preset / visual on)
@@ -84,7 +88,11 @@ local function destroy_panel()
 	Rivers.State.ui_rain_label = false
 	Rivers.State.ui_flow_edit = false
 	Rivers.State.ui_height_edit = false
-	Rivers.State.ui_outflow_edit = false
+	Rivers.State.ui_drainage_edit = false
+	Rivers.State.ui_evaporation_edit = false
+	Rivers.State.ui_infiltration_edit = false
+	Rivers.State.ui_volume_label = false
+	Rivers.State.ui_area_label = false
 end
 
 local function update_toggle_visual()
@@ -109,26 +117,47 @@ end
 -- clobber what the player is typing mid-keystroke. The check uses the global
 -- GetKeyboardFocus() (XDesktop.lua:144); if it isn't available we err on the
 -- side of not touching the field, which is the safe direction.
+-- Each entry maps an input field's State handle to the segment field it
+-- mirrors. The live refresh writes the current value into every field that
+-- isn't being typed in.
+local INPUT_FIELDS = {
+	{ state_key = "ui_height_edit", seg_field = "actual_level_m" },
+	{ state_key = "ui_flow_edit", seg_field = "discharge_m3s" },
+	{ state_key = "ui_drainage_edit", seg_field = "drainage_m3s" },
+	{ state_key = "ui_evaporation_edit", seg_field = "evaporation_m3s" },
+	{ state_key = "ui_infiltration_edit", seg_field = "infiltration_m3s" },
+}
+
+-- Push the segment's current values into the input fields. We only write a
+-- field that does NOT currently hold keyboard focus -- otherwise we'd clobber
+-- what the player is typing mid-keystroke. The check uses the global
+-- GetKeyboardFocus() (XDesktop.lua:144); if it isn't available we err on the
+-- side of not touching the field, which is the safe direction.
 local function refresh_input_fields(seg)
 	local get_focus = rawget(_G, "GetKeyboardFocus")
 	local focused = type(get_focus) == "function" and get_focus() or nil
-
-	local height_edit = Rivers.State.ui_height_edit
-	if is_window_alive(height_edit) and height_edit ~= focused then
-		local text = seg and format_float(seg.actual_level_m or 0, 2) or ""
-		pcall(function() height_edit:SetText(text) end)
+	for i = 1, #INPUT_FIELDS do
+		local edit = Rivers.State[INPUT_FIELDS[i].state_key]
+		if is_window_alive(edit) and edit ~= focused then
+			local text = seg and format_float(seg[INPUT_FIELDS[i].seg_field] or 0, 2) or ""
+			pcall(function() edit:SetText(text) end)
+		end
 	end
+end
 
-	local flow_edit = Rivers.State.ui_flow_edit
-	if is_window_alive(flow_edit) and flow_edit ~= focused then
-		local text = seg and format_float(seg.discharge_m3s or 0, 2) or ""
-		pcall(function() flow_edit:SetText(text) end)
+-- Read-only readouts: volume (m^3) and water surface area (m^2). Surface area
+-- is the flooded tile area; flooded_area_wu2 -> m^2 divides by guim^2.
+local function update_readouts(seg)
+	local vol_label = Rivers.State.ui_volume_label
+	if is_window_alive(vol_label) then
+		local text = seg and ("volume:  " .. format_float(seg.volume_m3 or 0, 1) .. " m^3") or "volume:  --"
+		pcall(function() vol_label:SetText(text) end)
 	end
-
-	local outflow_edit = Rivers.State.ui_outflow_edit
-	if is_window_alive(outflow_edit) and outflow_edit ~= focused then
-		local text = seg and format_float(seg.outflow_m3s or 0, 2) or ""
-		pcall(function() outflow_edit:SetText(text) end)
+	local area_label = Rivers.State.ui_area_label
+	if is_window_alive(area_label) then
+		local area_m2 = seg and ((seg.flooded_area_wu2 or 0) / (guim * guim)) or nil
+		local text = area_m2 and ("surface: " .. format_float(area_m2, 1) .. " m^2") or "surface: --"
+		pcall(function() area_label:SetText(text) end)
 	end
 end
 
@@ -137,23 +166,21 @@ local function update_level_label()
 	local seg_id = Rivers.State.current_marker_segment
 	local seg = seg_id and Rivers.State.segments[seg_id] or nil
 
-	-- Keep the input fields live first; do this whether or not the status
-	-- label exists, since the fields can survive a missing label.
+	-- Keep the input fields + readouts live first; do this whether or not the
+	-- status label exists, since they can survive a missing label.
 	refresh_input_fields(seg)
+	update_readouts(seg)
 
 	if not is_window_alive(label) then return end
-	-- The numeric level / inflow / outflow now live in the input fields below,
-	-- so the status line only reports what those fields don't: the water depth
-	-- class at the source and how many tiles are currently flooded.
+	-- The numeric values live in the fields/readouts below, so the status line
+	-- only reports the water depth class at the source.
 	if not seg then
 		pcall(function() label:SetText("Click a hole to start") end)
 		return
 	end
 	local Tool = Rivers.Tool
 	local class = (Tool and Tool.GetCurrentDepthClass()) or "dry"
-	local tiles = seg.flooded_tile_count or 0
-	local text = class .. "  |  flooded " .. tostring(tiles) .. " tiles"
-	pcall(function() label:SetText(text) end)
+	pcall(function() label:SetText("source depth: " .. class) end)
 end
 
 local function update_rain_label()
@@ -414,26 +441,76 @@ function UI.Show()
 		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, inflow input field omitted")
 	end
 
-	-- Outflow row: drain in m^3/s. -/+ adjusts how much water leaves; level
-	-- rises when inflow > outflow + passive losses, recedes otherwise.
-	local outflow_edit = make_param_row({
-		id = "RiversOutflowRow",
-		label = "outflow:",
-		max_value = (Rivers.Config and Rivers.Config.HYDRO_OUTFLOW_MAX_M3S) or 100,
-		step = (Rivers.Config and Rivers.Config.HYDRO_OUTFLOW_STEP_M3S) or 0.5,
+	-- Drainage row: player-controlled drain in m^3/s (water leaving the system).
+	local drainage_edit = make_param_row({
+		id = "RiversDrainageRow",
+		label = "drainage:",
+		max_value = (Rivers.Config and Rivers.Config.HYDRO_DRAINAGE_MAX_M3S) or 100,
+		step = (Rivers.Config and Rivers.Config.HYDRO_DRAINAGE_STEP_M3S) or 0.5,
 		hint = "m^3/s",
 	}, function(delta)
-		Rivers.Tool.AdjustOutflow(delta)
+		Rivers.Tool.AdjustDrainage(delta)
 	end)
-	if outflow_edit then
-		Rivers.State.ui_outflow_edit = outflow_edit
+	if drainage_edit then
+		Rivers.State.ui_drainage_edit = drainage_edit
 	else
-		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, outflow input field omitted")
+		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, drainage input field omitted")
 	end
 
-	-- Apply + Clear All row: Apply reads the flow_edit value and pushes it to
-	-- the current source's discharge (no Enter shortcut anymore -- only this
-	-- button commits a typed value).
+	-- Evaporation row: loss in m^3/s from the surface.
+	local evaporation_edit = make_param_row({
+		id = "RiversEvaporationRow",
+		label = "evaporation:",
+		max_value = (Rivers.Config and Rivers.Config.HYDRO_EVAPORATION_MAX_M3S) or 100,
+		step = (Rivers.Config and Rivers.Config.HYDRO_EVAPORATION_STEP_M3S) or 0.1,
+		hint = "m^3/s",
+	}, function(delta)
+		Rivers.Tool.AdjustEvaporation(delta)
+	end)
+	if evaporation_edit then
+		Rivers.State.ui_evaporation_edit = evaporation_edit
+	else
+		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, evaporation input field omitted")
+	end
+
+	-- Infiltration row: loss in m^3/s soaking into the ground.
+	local infiltration_edit = make_param_row({
+		id = "RiversInfiltrationRow",
+		label = "infiltration:",
+		max_value = (Rivers.Config and Rivers.Config.HYDRO_INFILTRATION_MAX_M3S) or 100,
+		step = (Rivers.Config and Rivers.Config.HYDRO_INFILTRATION_STEP_M3S) or 0.1,
+		hint = "m^3/s",
+	}, function(delta)
+		Rivers.Tool.AdjustInfiltration(delta)
+	end)
+	if infiltration_edit then
+		Rivers.State.ui_infiltration_edit = infiltration_edit
+	else
+		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, infiltration input field omitted")
+	end
+
+	-- Read-only readouts: live volume + water surface area of the current body.
+	Rivers.State.ui_volume_label = x_label:new({
+		Text = "volume:  --",
+		Translate = false,
+		TextStyle = "ConsoleLog",
+		TextColor = TEXT_COLOR,
+		HAlign = "stretch",
+		MinHeight = ROW_HEIGHT,
+		MaxHeight = ROW_HEIGHT,
+	}, panel)
+	Rivers.State.ui_area_label = x_label:new({
+		Text = "surface: --",
+		Translate = false,
+		TextStyle = "ConsoleLog",
+		TextColor = TEXT_COLOR,
+		HAlign = "stretch",
+		MinHeight = ROW_HEIGHT,
+		MaxHeight = ROW_HEIGHT,
+	}, panel)
+
+	-- Apply + Clear All row: Apply commits every typed field value to the
+	-- current source (no Enter shortcut -- only this button commits).
 	local action_row = x_window:new({
 		Id = "RiversActionRow",
 		LayoutMethod = "HList",
@@ -443,27 +520,24 @@ function UI.Show()
 		MaxWidth = 260,
 	}, panel)
 
+	-- Apply commits each field's typed value through the matching Tool setter.
+	local apply_specs = {
+		{ state_key = "ui_height_edit", setter = "SetLevel" },
+		{ state_key = "ui_flow_edit", setter = "SetDischarge" },
+		{ state_key = "ui_drainage_edit", setter = "SetDrainage" },
+		{ state_key = "ui_evaporation_edit", setter = "SetEvaporation" },
+		{ state_key = "ui_infiltration_edit", setter = "SetInfiltration" },
+	}
 	make_button(action_row, "Apply", function()
 		if not Rivers.Tool then return end
-		local height_input = Rivers.State.ui_height_edit
-		if height_input and is_window_alive(height_input) then
-			local v = height_input:GetNumber()
-			if type(v) == "number" and type(Rivers.Tool.SetLevel) == "function" then
-				Rivers.Tool.SetLevel(v)
-			end
-		end
-		local flow_input = Rivers.State.ui_flow_edit
-		if flow_input and is_window_alive(flow_input) then
-			local v = flow_input:GetNumber()
-			if type(v) == "number" and type(Rivers.Tool.SetDischarge) == "function" then
-				Rivers.Tool.SetDischarge(v)
-			end
-		end
-		local outflow_input = Rivers.State.ui_outflow_edit
-		if outflow_input and is_window_alive(outflow_input) then
-			local v = outflow_input:GetNumber()
-			if type(v) == "number" and type(Rivers.Tool.SetOutflow) == "function" then
-				Rivers.Tool.SetOutflow(v)
+		for i = 1, #apply_specs do
+			local edit = Rivers.State[apply_specs[i].state_key]
+			local fn = Rivers.Tool[apply_specs[i].setter]
+			if edit and is_window_alive(edit) and type(fn) == "function" then
+				local v = edit:GetNumber()
+				if type(v) == "number" then
+					fn(v)
+				end
 			end
 		end
 		UI.Refresh()
