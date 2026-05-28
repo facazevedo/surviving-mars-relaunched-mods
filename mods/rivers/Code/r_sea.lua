@@ -111,10 +111,40 @@ function Sea.Find()
 	return nil
 end
 
--- Are there any water bodies at all (sea or lake)? Used to enforce that a sea
--- and lakes never coexist.
-local function any_segment_exists()
-	return next(Rivers.State.segments) ~= nil
+-- Absorb every lake the sea has reached: any non-sea segment whose source point
+-- now sits at or below the sea surface (sea_z_wu) is part of the sea, so we
+-- delete its marker and segment ("the river becomes a sea"). The sea's own
+-- map-wide water object keeps that ground flooded after the lake marker is
+-- removed. sea_id is kept as the current marker if an absorbed lake was current.
+local function absorb_touching_lakes(map, sea_z_wu, sea_id)
+	local terrain_table = rawget(_G, "terrain")
+	if type(terrain_table) ~= "table" or type(terrain_table.GetHeight) ~= "function" then
+		return 0
+	end
+	local Water = Rivers.Water
+	local segments = Rivers.State.segments
+	local absorbed = 0
+	for id, seg in pairs(segments) do
+		if not seg.is_sea then
+			local th = terrain_table.GetHeight(map, point(seg.marker_x or 0, seg.marker_y or 0))
+			if type(th) == "number" and th <= sea_z_wu then
+				if Water and type(Water.RemoveMarker) == "function" and seg.water_obj then
+					Water.RemoveMarker(map, seg.water_obj, seg.bbox)
+				end
+				segments[id] = nil
+				if Rivers.State.current_marker_segment == id then
+					local sea_seg = sea_id and segments[sea_id] or nil
+					Rivers.State.current_marker = sea_seg and sea_seg.water_obj or false
+					Rivers.State.current_marker_segment = sea_id or false
+				end
+				absorbed = absorbed + 1
+			end
+		end
+	end
+	if absorbed > 0 then
+		DebugLog.Info(SCOPE, "absorbed lakes into sea", { count = absorbed })
+	end
+	return absorbed
 end
 
 function Sea.Generate(level_m)
@@ -130,11 +160,11 @@ function Sea.Generate(level_m)
 	if not Water or type(Water.PlaceMarker) ~= "function" then
 		return nil, "Rivers.Water module not loaded"
 	end
-	-- A sea is map-wide, so it must not coexist with lakes (or a second sea).
-	-- The player clears existing water first.
-	if any_segment_exists() then
-		DebugLog.Warn(SCOPE, "Generate blocked: water already exists")
-		return nil, "clear all water before generating a sea"
+	-- Only one sea at a time. Lakes are allowed to exist -- any the sea reaches
+	-- get absorbed below (merge-on-contact), so we don't block on them.
+	if Sea.Find() then
+		DebugLog.Warn(SCOPE, "Generate blocked: a sea already exists")
+		return nil, "a sea already exists (clear it first)"
 	end
 
 	local cfg = config()
@@ -197,6 +227,9 @@ function Sea.Generate(level_m)
 	Rivers.State.current_marker = obj
 	Rivers.State.current_marker_segment = id
 
+	-- Any lake the freshly-placed sea now covers becomes part of the sea.
+	absorb_touching_lakes(map, water_z_wu, id)
+
 	DebugLog.Info(SCOPE, "Generate ok", {
 		id = id,
 		level_m = level_m,
@@ -242,6 +275,9 @@ function Sea.SetLevel(seg_id, level_m)
 
 	seg.actual_level_m = v
 	seg.applied_level_m = v
+
+	-- Raising the sea can reach lakes it didn't before -- absorb them.
+	absorb_touching_lakes(map, water_z_wu, seg_id)
 
 	-- Refresh the area/volume estimate for the new level.
 	local _pt, _min, samples, cell_wu2 = scan_heights(map)
