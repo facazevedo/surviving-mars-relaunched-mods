@@ -169,6 +169,13 @@ function Budget.SetLevel(seg_id, level_m)
 	if not seg then
 		return nil, "no such segment: " .. tostring(seg_id)
 	end
+	-- A sea isn't volume-driven; its level is applied map-wide by r_sea.lua.
+	if seg.is_sea then
+		if Rivers.Sea and type(Rivers.Sea.SetLevel) == "function" then
+			return Rivers.Sea.SetLevel(seg_id, level_m)
+		end
+		return nil, "Rivers.Sea module not loaded"
+	end
 	local v = tonumber(level_m) or 0
 	if v < 0 then v = 0 end
 
@@ -239,6 +246,13 @@ end
 -- (heavy) visual rebuild.
 local function update_segment_volume(seg, dt_s, cfg)
 	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
+		return false
+	end
+	-- Seas are static, engine-managed bodies (r_sea.lua); the per-tick volume
+	-- simulation + map-wide flood-fill would be both wrong and expensive for
+	-- them, so they never tick. Their level only changes on explicit player
+	-- action via Rivers.Sea.SetLevel.
+	if seg.is_sea then
 		return false
 	end
 

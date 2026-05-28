@@ -47,7 +47,14 @@ end
 
 -- Place a TerrainWaterObject marker at `center_pt` with its visual z set to
 -- (floor_wu + water_level_m_in_wu). Returns the placed marker or (nil, err).
-function Water.PlaceMarker(map, center_pt, floor_wu, water_level_m, bbox)
+--
+-- avoid_spill (default true): when true the engine lowers z incrementally if the
+-- chosen level would flood the map, keeping a pool contained. A SEA wants the
+-- opposite -- it should flood the whole connected basin -- so r_sea.lua passes
+-- false. apply_box, when given, forces ApplyAllWaterObjects over that exact box
+-- (the sea passes the full map) instead of the engine's per-marker
+-- invalidation_box.
+function Water.PlaceMarker(map, center_pt, floor_wu, water_level_m, bbox, avoid_spill, apply_box)
 	if not api_available() then
 		return nil, "TerrainWaterObject / ApplyAllWaterObjects unavailable"
 	end
@@ -75,16 +82,13 @@ function Water.PlaceMarker(map, center_pt, floor_wu, water_level_m, bbox)
 	-- fills depressions to. SetPos uses world units.
 	obj:SetPos(center_pt:x(), center_pt:y(), water_z)
 
-	-- Refresh this marker's water grid and visuals. avoid_spill=true makes the
-	-- engine lower z incrementally if the chosen level would flood the map.
-	obj:UpdateGridAndVisuals(true)
+	-- avoid_spill=true clamps z down to avoid flooding the map; false lets the
+	-- level stand (used for seas, which are supposed to flood the basin).
+	obj:UpdateGridAndVisuals(avoid_spill ~= false)
 
-	-- Rebuild water grid + planes only for the changed area. Passing an
-	-- invalidation_box keeps ApplyAllWaterObjects from touching unrelated water.
-	local apply_bbox = bbox
-	if obj.invalidation_box then
-		apply_bbox = obj.invalidation_box
-	end
+	-- Rebuild water grid + planes. apply_box (sea: full map) wins; otherwise use
+	-- the engine's per-marker invalidation_box, falling back to the passed bbox.
+	local apply_bbox = apply_box or obj.invalidation_box or bbox
 	ApplyAllWaterObjects(map, apply_bbox)
 
 	DebugLog.Info(SCOPE, "placed water marker", {
@@ -92,6 +96,7 @@ function Water.PlaceMarker(map, center_pt, floor_wu, water_level_m, bbox)
 		y = center_pt:y(),
 		floor_wu = floor_wu,
 		water_z = water_z,
+		avoid_spill = avoid_spill ~= false,
 		spilled = obj.zoffset ~= 0 and obj.zoffset or "no",
 	})
 	return obj
@@ -99,15 +104,15 @@ end
 
 -- Raise/lower the water surface of an existing marker. `new_water_z` is in world
 -- units; the caller computes it as (ground_at_marker_xy + level_meters * guim).
--- Reapplies only the bbox so unrelated water is left alone.
-function Water.SetMarkerLevel(map, obj, new_water_z)
+-- avoid_spill / apply_box behave as in PlaceMarker.
+function Water.SetMarkerLevel(map, obj, new_water_z, avoid_spill, apply_box)
 	if not obj or not IsValid(obj) then
 		return false, "marker is invalid"
 	end
 	local x, y = obj:GetVisualPosXYZ()
 	obj:SetPos(x, y, new_water_z)
-	obj:UpdateGridAndVisuals(true)
-	local apply_bbox = obj.invalidation_box
+	obj:UpdateGridAndVisuals(avoid_spill ~= false)
+	local apply_bbox = apply_box or obj.invalidation_box
 	if type(rawget(_G, "ApplyAllWaterObjects")) == "function" then
 		ApplyAllWaterObjects(map, apply_bbox)
 	end

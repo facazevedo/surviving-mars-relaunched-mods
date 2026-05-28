@@ -16,6 +16,7 @@ return PlaceObj('ModDef', {
 		"Code/r_depth.lua",
 		"Code/r_flood.lua",
 		"Code/r_budget.lua",
+		"Code/r_sea.lua",
 		"Code/r_rain.lua",
 		"Code/r_api.lua",
 		"Code/r_tool.lua",

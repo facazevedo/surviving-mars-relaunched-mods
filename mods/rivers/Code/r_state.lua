@@ -24,6 +24,9 @@
 --
 -- A segment record (post-Phase-1 shape):
 --   {
+--     is_sea            = bool,                -- true for a whole-map sea (r_sea.lua):
+--                                              --   engine-managed, skipped by the budget
+--                                              --   tick, level changed via Rivers.Sea
 --     -- placement / engine handles
 --     water_obj         = TerrainWaterObject,
 --     bbox              = box,                 -- carved bowl bbox (world units)

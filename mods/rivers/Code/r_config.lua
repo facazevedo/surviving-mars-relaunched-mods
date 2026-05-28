@@ -150,6 +150,21 @@ config.FloodMaxTiles = 5000                 -- safety cap per segment per recomp
 config.FloodScanMarginMeters = 50           -- padding around segment bbox for the scan window
 
 -- ============================================================================
+-- SEA GENERATION
+-- ============================================================================
+-- "Generate Sea" floods every tile of the map that sits below a global sea
+-- level, measured in meters ABOVE the map's lowest terrain point. The flood is
+-- done by the engine's own water grid (one TerrainWaterObject at the lowest
+-- point, applied map-wide with spill-avoidance off), not the per-segment
+-- flood-fill -- so it's cheap and the sea is a single static body.
+--   SeaLevelMeters  -- default water depth above the map minimum for a new sea.
+--   SeaScanSamples  -- coarse NxN grid used to find the lowest point and to
+--                      estimate the sea's flooded area + volume. Higher = more
+--                      accurate readouts, more GetHeight calls at generation.
+config.SeaLevelMeters = 10
+config.SeaScanSamples = 64
+
+-- ============================================================================
 -- SAFETY
 -- ============================================================================
 -- The carve operation iterates SetHeightCircle calls along the path. If a path
@@ -253,6 +268,9 @@ C.HYDRO_BUTTON_REPEAT_INTERVAL_MS = as_number(config.HydroButtonRepeatIntervalMs
 C.FLOOD_TILE_SIZE_M = as_number(config.FloodTileSizeMeters, 5)
 C.FLOOD_MAX_TILES = as_number(config.FloodMaxTiles, 5000)
 C.FLOOD_SCAN_MARGIN_M = as_number(config.FloodScanMarginMeters, 50)
+
+C.SEA_LEVEL_METERS = as_number(config.SeaLevelMeters, 10)
+C.SEA_SCAN_SAMPLES = as_number(config.SeaScanSamples, 64)
 
 C.DEBUG_LOGS = as_bool(config.DebugLogs)
 C.DEBUG_INIT = as_bool(config.DebugInit)

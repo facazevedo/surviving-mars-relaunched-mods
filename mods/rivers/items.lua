@@ -32,6 +32,10 @@ return {
 		'CodeFileName', "Code/r_budget.lua",
 	}),
 	PlaceObj('ModItemCode', {
+		'name', "r_sea",
+		'CodeFileName', "Code/r_sea.lua",
+	}),
+	PlaceObj('ModItemCode', {
 		'name', "r_rain",
 		'CodeFileName', "Code/r_rain.lua",
 	}),
