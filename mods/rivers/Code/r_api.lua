@@ -90,7 +90,12 @@ function Rivers.Create(path, params)
 	end
 
 	params = params or {}
-	local water_level_m = params.water_level_m or config().DEFAULT_WATER_LEVEL_METERS or 5
+	local cfg = config()
+	local water_level_m = params.water_level_m or cfg.DEFAULT_WATER_LEVEL_METERS or 5
+	-- Carved depth is the bowl rim above the bowl floor -- this is spill_level
+	-- for the budget. params.depth_m overrides DEFAULT_DEPTH_METERS via the
+	-- same path the carve uses, so they always agree.
+	local depth_m = params.depth_m or cfg.DEFAULT_DEPTH_METERS or 8
 
 	local bbox, floor_wu = Terrain.CarveBowlAlongPath(map, points, params)
 	if not bbox then
@@ -105,19 +110,37 @@ function Rivers.Create(path, params)
 		return nil, err2
 	end
 
+	-- Budget seed for a carved-path segment. bowl_area is approximated by the
+	-- carve bbox area; over- vs underestimate balances out across ticks because
+	-- the flood-fill replaces the surface_area each tick.
+	local bx0, by0, bx1, by1 = bbox:xyxy()
+	local bowl_area_wu2 = (bx1 - bx0) * (by1 - by0)
+	local bowl_area_m2 = bowl_area_wu2 / (guim * guim)
+	local initial_volume_m3 = bowl_area_m2 * water_level_m
+	local initial_discharge = cfg.HYDRO_INITIAL_DISCHARGE_M3S or 0
+
 	local id = Rivers.State:RegisterSegment({
 		water_obj = obj,
 		bbox = bbox,
 		floor_wu = floor_wu,
 		marker_x = marker_pt:x(),
 		marker_y = marker_pt:y(),
-		water_level_m = water_level_m,
+		spill_level_m = depth_m,
+		bowl_area_wu2 = bowl_area_wu2,
+		discharge_m3s = initial_discharge,
+		volume_m3 = initial_volume_m3,
+		actual_level_m = water_level_m,
+		flooded_tile_count = 0,
+		flooded_area_wu2 = 0,
+		surface_area_wu2 = 0,
 	})
 	DebugLog.Info(SCOPE, "Create ok", {
 		id = id,
 		points = #points,
 		floor_wu = floor_wu,
 		water_level_m = water_level_m,
+		spill_level_m = depth_m,
+		discharge_m3s = initial_discharge,
 	})
 	return id
 end

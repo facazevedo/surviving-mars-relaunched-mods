@@ -106,7 +106,7 @@ local function place_or_select_at(click_pt)
 		set_current(nearby_id, nearby_seg.water_obj)
 		DebugLog.Info(SCOPE, "selected existing marker", {
 			id = nearby_id,
-			level_m = nearby_seg.water_level_m,
+			discharge_m3s = nearby_seg.discharge_m3s,
 		})
 		return nearby_id
 	end
@@ -132,18 +132,36 @@ local function place_or_select_at(click_pt)
 		return nil, err
 	end
 
+	-- Budget seed for a click-placed source. There's no real carved bowl here,
+	-- so "spill" is set to start_level_m (the level the click visually places),
+	-- and the bowl area is approximated from the bbox. The initial volume is
+	-- whatever fills the bowl to start_level_m so the marker appears full at
+	-- placement instead of slowly rising.
+	local bowl_area_wu2 = (2 * radius_wu) * (2 * radius_wu)
+	local bowl_area_m2 = bowl_area_wu2 / (guim * guim)
+	local initial_volume_m3 = bowl_area_m2 * start_level_m
+	local initial_discharge = cfg.HYDRO_INITIAL_DISCHARGE_M3S or 0
+
 	local id = Rivers.State:RegisterSegment({
 		water_obj = obj,
 		bbox = bbox,
 		floor_wu = floor_wu,
 		marker_x = click_pt:x(),
 		marker_y = click_pt:y(),
-		water_level_m = start_level_m,
+		spill_level_m = start_level_m,
+		bowl_area_wu2 = bowl_area_wu2,
+		discharge_m3s = initial_discharge,
+		volume_m3 = initial_volume_m3,
+		actual_level_m = start_level_m,
+		flooded_tile_count = 0,
+		flooded_area_wu2 = 0,
+		surface_area_wu2 = 0,
 	})
 	set_current(id, obj)
 	DebugLog.Info(SCOPE, "placed new marker", {
 		id = id,
 		level_m = start_level_m,
+		discharge_m3s = initial_discharge,
 		x = click_pt:x(),
 		y = click_pt:y(),
 	})
@@ -166,19 +184,33 @@ end
 -- + / - adjustments on the most-recent marker
 -- ----------------------------------------------------------------------------
 
+function Tool.GetCurrentDischarge()
+	local seg_id = Rivers.State.current_marker_segment
+	if not seg_id then return nil end
+	local seg = Rivers.State.segments[seg_id]
+	if not seg then return nil end
+	return seg.discharge_m3s or 0
+end
+
 function Tool.GetCurrentLevel()
 	local seg_id = Rivers.State.current_marker_segment
 	if not seg_id then return nil end
 	local seg = Rivers.State.segments[seg_id]
 	if not seg then return nil end
-	return seg.water_level_m
+	return seg.actual_level_m or 0
 end
 
-function Tool.AdjustLevel(delta_m)
-	local map = current_map()
-	if not map then
-		return nil, "no current map"
-	end
+function Tool.GetCurrentDepthClass()
+	local seg_id = Rivers.State.current_marker_segment
+	if not seg_id then return nil end
+	local seg = Rivers.State.segments[seg_id]
+	if not seg or not Rivers.Depth then return nil end
+	return Rivers.Depth.Classify(seg.actual_level_m or 0)
+end
+
+-- The +/- buttons now adjust source discharge (m^3/s). The actual water level
+-- is driven by the budget ticker, not by this call.
+function Tool.AdjustDischarge(delta_m3s)
 	local seg_id = Rivers.State.current_marker_segment
 	if not seg_id then
 		return nil, "no current marker (click a hole first)"
@@ -188,26 +220,10 @@ function Tool.AdjustLevel(delta_m)
 		clear_current()
 		return nil, "current marker is gone"
 	end
-	local new_level_m = (seg.water_level_m or 0) + (delta_m or 0)
-	if new_level_m < 0 then
-		new_level_m = 0
+	if not Rivers.Budget or type(Rivers.Budget.AdjustDischarge) ~= "function" then
+		return nil, "Rivers.Budget module not loaded"
 	end
-	local new_water_z = seg.floor_wu + meters_to_wu(new_level_m)
-	local Water = Rivers.Water
-	if not Water then
-		return nil, "Rivers.Water module not loaded"
-	end
-	local ok, err = Water.SetMarkerLevel(map, seg.water_obj, new_water_z)
-	if not ok then
-		return nil, err
-	end
-	seg.water_level_m = new_level_m
-	DebugLog.Info(SCOPE, "adjusted level", {
-		id = seg_id,
-		new_level_m = new_level_m,
-		delta_m = delta_m,
-	})
-	return new_level_m
+	return Rivers.Budget.AdjustDischarge(seg_id, delta_m3s or 0)
 end
 
 -- ----------------------------------------------------------------------------

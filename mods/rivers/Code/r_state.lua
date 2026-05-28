@@ -4,7 +4,7 @@
 -- The canonical mod version lives in metadata.lua ('version'); this file owns
 -- runtime state only and must not duplicate version information.
 --
--- State shape:
+-- Top-level state:
 --   Rivers.State.segments         -- segment_id (string) -> segment record
 --   Rivers.State.next_id          -- monotonic counter feeding segment ids
 --   Rivers.State.enabled          -- lifecycle flag (false until Enable())
@@ -15,10 +15,30 @@
 --   Rivers.State.ui_panel         -- right-side panel handle (r_ui.lua)
 --   Rivers.State.ui_toggle_button -- panel button handle  (r_ui.lua)
 --   Rivers.State.ui_level_label   -- panel label handle   (r_ui.lua)
+--   Rivers.State.ui_rain_label    -- panel rain label     (r_ui.lua)
+--   Rivers.State.rain_visual_on   -- visual rain override active (r_rain.lua)
+--   Rivers.State.budget_thread    -- game-time ticker handle (r_budget.lua)
 --
--- A segment record:
---   { water_obj = obj, bbox = box, floor_wu = int,
---     marker_x = int, marker_y = int, water_level_m = number }
+-- A segment record (post-Phase-1 shape):
+--   {
+--     -- placement / engine handles
+--     water_obj         = TerrainWaterObject,
+--     bbox              = box,                 -- carved bowl bbox (world units)
+--     marker_x, marker_y = wu int,             -- source point
+--     floor_wu          = int,                 -- bowl floor height (world units)
+--     spill_wu          = int,                 -- bowl rim height (world units), == carve baseline
+--     bowl_area_wu2     = int,                 -- estimated bowl floor area (world units^2)
+--
+--     -- water budget (driven by r_budget.lua)
+--     discharge_m3s     = number,              -- player-controlled inflow
+--     volume_m3         = number,              -- accumulating water held in basin + spill
+--     actual_level_m    = number,              -- meters above floor; what the marker reflects
+--
+--     -- flood-fill cache (set by r_flood.lua each tick)
+--     flooded_tile_count = int,
+--     flooded_area_wu2   = int,
+--     surface_area_wu2   = int,                -- equals flooded_area_wu2 for Phase 1
+--   }
 
 local Rivers = rawget(_G, "Rivers")
 if type(Rivers) ~= "table" then

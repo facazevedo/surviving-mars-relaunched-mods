@@ -20,6 +20,18 @@ return {
 		'CodeFileName', "Code/r_water.lua",
 	}),
 	PlaceObj('ModItemCode', {
+		'name', "r_depth",
+		'CodeFileName', "Code/r_depth.lua",
+	}),
+	PlaceObj('ModItemCode', {
+		'name', "r_flood",
+		'CodeFileName', "Code/r_flood.lua",
+	}),
+	PlaceObj('ModItemCode', {
+		'name', "r_budget",
+		'CodeFileName', "Code/r_budget.lua",
+	}),
+	PlaceObj('ModItemCode', {
 		'name', "r_rain",
 		'CodeFileName', "Code/r_rain.lua",
 	}),

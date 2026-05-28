@@ -5,8 +5,8 @@
 --   │           RIVERS           │   <- title
 --   ├────────────────────────────┤
 --   │  [ Activate Water Mode ]   │   <- toggle (changes label when active)
---   │  Water level: N m          │   <- current marker's level
---   │  [ - ]            [ + ]    │   <- step buttons
+--   │  flow N m^3/s | lvl N m... │   <- current source: discharge, level, class, flooded tiles
+--   │  [ - ]            [ + ]    │   <- discharge -/+ (m^3/s, step = HYDRO_DISCHARGE_STEP_M3S)
 --   │  [ Clear All Water ]       │
 --   │                            │
 --   │           RAIN             │   <- section label
@@ -92,17 +92,33 @@ local function update_toggle_visual()
 	pcall(function() btn:SetBackground(active and BUTTON_ACTIVE or BUTTON_BACKGROUND) end)
 end
 
+local function format_float(n, decimals)
+	if type(n) ~= "number" then return "--" end
+	local mult = 10 ^ (decimals or 2)
+	local r = math.floor(n * mult + 0.5) / mult
+	return tostring(r)
+end
+
 local function update_level_label()
 	local label = Rivers.State.ui_level_label
 	if not is_window_alive(label) then return end
 	local Tool = Rivers.Tool
-	local level = Tool and Tool.GetCurrentLevel() or nil
-	local text
-	if level then
-		text = "Water level: " .. tostring(level) .. " m"
-	else
-		text = "Water level: -- (click a hole)"
+	if not (Tool and Tool.GetCurrentDischarge) then
+		pcall(function() label:SetText("Click a hole to start") end)
+		return
 	end
+	local discharge = Tool.GetCurrentDischarge()
+	if not discharge then
+		pcall(function() label:SetText("Click a hole to start") end)
+		return
+	end
+	local level = Tool.GetCurrentLevel() or 0
+	local class = Tool.GetCurrentDepthClass() or "dry"
+	local seg_id = Rivers.State.current_marker_segment
+	local seg = seg_id and Rivers.State.segments[seg_id] or nil
+	local tiles = seg and seg.flooded_tile_count or 0
+	local text = "flow " .. format_float(discharge, 2) .. " m^3/s  |  level " ..
+		format_float(level, 2) .. " m (" .. class .. ")  |  flooded " .. tostring(tiles) .. " tiles"
 	pcall(function() label:SetText(text) end)
 end
 
@@ -216,9 +232,9 @@ function UI.Show()
 	end)
 	Rivers.State.ui_toggle_button = toggle
 
-	-- Level label
+	-- Status label (filled in by update_level_label on Refresh)
 	local level_label = x_label:new({
-		Text = "Water level: -- (click a hole)",
+		Text = "Click a hole to start",
 		Translate = false,
 		TextStyle = "ConsoleLog",
 		TextColor = TEXT_COLOR,
@@ -240,15 +256,15 @@ function UI.Show()
 
 	make_button(minus_plus_row, "  -  ", function()
 		if not Rivers.Tool then return end
-		local step = (Rivers.Config and Rivers.Config.WATER_TOOL_STEP_METERS) or 1
-		Rivers.Tool.AdjustLevel(-step)
+		local step = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_STEP_M3S) or 0.5
+		Rivers.Tool.AdjustDischarge(-step)
 		UI.Refresh()
 	end, { halign = "stretch", min_width = 100, max_width = 120 })
 
 	make_button(minus_plus_row, "  +  ", function()
 		if not Rivers.Tool then return end
-		local step = (Rivers.Config and Rivers.Config.WATER_TOOL_STEP_METERS) or 1
-		Rivers.Tool.AdjustLevel(step)
+		local step = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_STEP_M3S) or 0.5
+		Rivers.Tool.AdjustDischarge(step)
 		UI.Refresh()
 	end, { halign = "stretch", min_width = 100, max_width = 120 })
 

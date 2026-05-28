@@ -41,6 +41,12 @@ function Lifecycle.Enable()
 		return true
 	end
 	Rivers.State.enabled = true
+	-- Start the hydrology ticker. StartTicker is idempotent; if no map is
+	-- loaded yet the ticker just no-ops until OnMsg.NewMapLoaded fires (which
+	-- also calls StartTicker after a map change, in case the old thread died).
+	if Rivers.Budget and type(Rivers.Budget.StartTicker) == "function" then
+		Rivers.Budget.StartTicker()
+	end
 	DebugLog.Info(SCOPE, "Enable: ready", {
 		patch_version = PATCH_VERSION,
 	})
@@ -54,6 +60,11 @@ function Lifecycle.Disable()
 	end
 	if Rivers.UI and type(Rivers.UI.Hide) == "function" then
 		Rivers.UI.Hide()
+	end
+	-- Stop the hydrology ticker first so the budget can't push a level change
+	-- onto a marker that ClearAll is about to delete.
+	if Rivers.Budget and type(Rivers.Budget.StopTicker) == "function" then
+		Rivers.Budget.StopTicker()
 	end
 	-- Visual rain is a mod-owned scene-param override -- clear it so vanilla
 	-- weather rendering returns. The disaster (g_RainDisaster) is engine game
@@ -71,10 +82,15 @@ function Lifecycle.Disable()
 end
 
 -- OnMsg.NewMapLoaded: the in-game HUD now exists, so we can attach the panel.
+-- This also (re)starts the hydrology ticker: a GameTimeThread does not survive
+-- a map change, so a fresh map needs a fresh thread.
 function OnMsg.NewMapLoaded(map, mapdata)
 	if Rivers.State.enabled ~= true then return end
 	if Rivers.UI and type(Rivers.UI.Show) == "function" then
 		Rivers.UI.Show()
+	end
+	if Rivers.Budget and type(Rivers.Budget.StartTicker) == "function" then
+		Rivers.Budget.StartTicker()
 	end
 end
 
@@ -95,6 +111,10 @@ end
 -- next map doesn't try to clean up dead references, and tear down the panel
 -- / click-overlay so they don't outlive the map.
 function OnMsg.DoneMap(map)
+	-- Stop the ticker first; otherwise it would race the segment teardown.
+	if Rivers.Budget and type(Rivers.Budget.StopTicker) == "function" then
+		Rivers.Budget.StopTicker()
+	end
 	if Rivers.Tool and type(Rivers.Tool.OnMapUnloaded) == "function" then
 		Rivers.Tool.OnMapUnloaded()
 	end

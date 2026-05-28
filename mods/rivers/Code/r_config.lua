@@ -87,6 +87,51 @@ config.WaterToolSelectRadiusM = 25
 config.DefaultRainPreset = "Normal_Low"
 
 -- ============================================================================
+-- HYDROLOGY -- depth classification
+-- ============================================================================
+-- Depth (meters of water above terrain at the sampled point) is bucketed into
+-- five classes by these thresholds. The classes drive every Phase 3 gameplay
+-- effect (movement, placement, damage). Thresholds are inclusive on the lower
+-- bound, e.g. depth >= 0.20 is "shallow".
+--   dry        depth < DepthWet
+--   wet        DepthWet   <= depth < DepthShallow
+--   shallow    DepthShallow <= depth < DepthDeep
+--   deep       DepthDeep   <= depth < DepthSubmerged
+--   submerged  depth >= DepthSubmerged
+config.DepthWetMeters = 0.01
+config.DepthShallowMeters = 0.20
+config.DepthDeepMeters = 0.75
+config.DepthSubmergedMeters = 2.00
+
+-- ============================================================================
+-- HYDROLOGY -- per-source water budget
+-- ============================================================================
+-- Each river segment runs a discrete water budget instead of a fixed level:
+--   volume += (discharge - evap*surface_area - infil*flooded_area) * dt
+-- where dt is HydroTickIntervalMs. discharge is the player-controlled inflow,
+-- modified by `+` / `-` in the water tool by HydroDischargeStepM3S per press.
+-- Rates are intentionally tunable; defaults are conservative so a brand-new
+-- segment with discharge=0 drains gradually rather than holding water forever.
+config.HydroTickIntervalMs = 1000           -- budget tick period (ms)
+config.HydroDischargeStepM3S = 0.5          -- + / - step (m^3/s)
+config.HydroInitialDischargeM3S = 0         -- discharge of a freshly created segment
+config.HydroEvaporationMPerSec = 0.00005    -- meters lost per second per m^2 of surface
+config.HydroInfiltrationMPerSec = 0.00002   -- meters lost per second per m^2 of flooded area
+config.HydroOutletCapacityM3S = 5           -- max passive drain when level > spill
+config.HydroOverflowFactor = 1              -- multiplier on outlet drain when above spill
+
+-- ============================================================================
+-- HYDROLOGY -- connected flood-fill
+-- ============================================================================
+-- The flood-fill walks a coarse tile grid out from the source point, accepting
+-- tiles whose terrain height is below the segment's current actual_level and
+-- which are reachable through other accepted tiles. FloodTileSizeMeters trades
+-- accuracy for cost; FloodMaxTiles is a runaway-guard cap.
+config.FloodTileSizeMeters = 5              -- grid resolution
+config.FloodMaxTiles = 5000                 -- safety cap per segment per recompute
+config.FloodScanMarginMeters = 50           -- padding around segment bbox for the scan window
+
+-- ============================================================================
 -- SAFETY
 -- ============================================================================
 -- The carve operation iterates SetHeightCircle calls along the path. If a path
@@ -101,7 +146,8 @@ config.MaxStepsPerSegment = 512     -- refuse path segments longer than this man
 -- ============================================================================
 -- DebugLogs gates all log output. Scoped flags (Debug<Scope>) can be set to
 -- false to silence one scope while DebugLogs stays on. Scopes emitted by this
--- mod: "Init", "Lifecycle", "API", "Terrain", "Water", "Tool", "UI", "Rain".
+-- mod: "Init", "Lifecycle", "API", "Terrain", "Water", "Tool", "UI", "Rain",
+--      "Depth", "Flood", "Budget".
 config.DebugLogs = true
 config.DebugInit = true
 config.DebugLifecycle = true
@@ -111,6 +157,9 @@ config.DebugWater = true
 config.DebugTool = true
 config.DebugUi = true
 config.DebugRain = true
+config.DebugDepth = false
+config.DebugFlood = true
+config.DebugBudget = true
 
 -- ============================================================================
 -- Typed config view: Rivers.Config
@@ -158,6 +207,23 @@ C.WATER_TOOL_SELECT_RADIUS_M = as_number(config.WaterToolSelectRadiusM, 25)
 C.MAX_PATH_POINTS = as_number(config.MaxPathPoints, 64)
 C.MAX_STEPS_PER_SEGMENT = as_number(config.MaxStepsPerSegment, 512)
 
+C.DEPTH_WET_M = as_number(config.DepthWetMeters, 0.01)
+C.DEPTH_SHALLOW_M = as_number(config.DepthShallowMeters, 0.20)
+C.DEPTH_DEEP_M = as_number(config.DepthDeepMeters, 0.75)
+C.DEPTH_SUBMERGED_M = as_number(config.DepthSubmergedMeters, 2.00)
+
+C.HYDRO_TICK_INTERVAL_MS = as_number(config.HydroTickIntervalMs, 1000)
+C.HYDRO_DISCHARGE_STEP_M3S = as_number(config.HydroDischargeStepM3S, 0.5)
+C.HYDRO_INITIAL_DISCHARGE_M3S = as_number(config.HydroInitialDischargeM3S, 0)
+C.HYDRO_EVAPORATION_M_PER_SEC = as_number(config.HydroEvaporationMPerSec, 0.00005)
+C.HYDRO_INFILTRATION_M_PER_SEC = as_number(config.HydroInfiltrationMPerSec, 0.00002)
+C.HYDRO_OUTLET_CAPACITY_M3S = as_number(config.HydroOutletCapacityM3S, 5)
+C.HYDRO_OVERFLOW_FACTOR = as_number(config.HydroOverflowFactor, 1)
+
+C.FLOOD_TILE_SIZE_M = as_number(config.FloodTileSizeMeters, 5)
+C.FLOOD_MAX_TILES = as_number(config.FloodMaxTiles, 5000)
+C.FLOOD_SCAN_MARGIN_M = as_number(config.FloodScanMarginMeters, 50)
+
 C.DEBUG_LOGS = as_bool(config.DebugLogs)
 C.DEBUG_INIT = as_bool(config.DebugInit)
 C.DEBUG_LIFECYCLE = as_bool(config.DebugLifecycle)
@@ -167,5 +233,8 @@ C.DEBUG_WATER = as_bool(config.DebugWater)
 C.DEBUG_TOOL = as_bool(config.DebugTool)
 C.DEBUG_UI = as_bool(config.DebugUi)
 C.DEBUG_RAIN = as_bool(config.DebugRain)
+C.DEBUG_DEPTH = as_bool(config.DebugDepth)
+C.DEBUG_FLOOD = as_bool(config.DebugFlood)
+C.DEBUG_BUDGET = as_bool(config.DebugBudget)
 
 Rivers.Config = C
