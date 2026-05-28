@@ -187,6 +187,11 @@ end
 -- Attach a single-line XNumberEdit to `parent`. The edit is passive: it only
 -- holds the typed value until a caller (the Apply button below) reads it via
 -- `:GetNumber()`. Returns the edit handle, or nil if XNumberEdit is unavailable.
+--
+-- XControl's default TextColor is RGB(32,32,32) (near-black), which is unreadable
+-- on this dark panel; we override TextColor + DisabledTextColor to the panel's
+-- white so the typed value matches the labels. HintColor stays slightly
+-- transparent so the hint reads as placeholder text rather than a real value.
 local function make_number_edit(parent, opts)
 	opts = opts or {}
 	local x_number = rawget(_G, "XNumberEdit")
@@ -202,6 +207,9 @@ local function make_number_edit(parent, opts)
 		Padding = box(6, 2, 6, 2),
 		Background = BUTTON_BACKGROUND,
 		BorderColor = TEXT_COLOR,
+		TextColor = TEXT_COLOR,
+		DisabledTextColor = TEXT_COLOR,
+		HintColor = RGBA(255, 255, 255, 128),
 		IsInRange = true,
 		MinValue = opts.min_value or 0,
 		MaxValue = opts.max_value or 1000,
