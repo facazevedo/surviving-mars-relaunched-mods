@@ -50,6 +50,55 @@ local function meters_to_wu(m)
 end
 
 -- ----------------------------------------------------------------------------
+-- Volume <-> level conversion (declared up here so Budget.SetLevel and
+-- tick_segment can both see them as upvalues; Lua resolves locals at function
+-- creation time, so they MUST be lexically above the first reference)
+-- ----------------------------------------------------------------------------
+
+-- Inverse of "how much water is in the basin given a level?". bowl_area_m2 is
+-- the segment's estimated bowl floor area; surface_area_m2 is the spilled-
+-- water surface area from the previous tick (or 0 if no spill yet).
+local function level_from_volume(seg, volume_m3, bowl_area_m2, surface_area_m2)
+	local spill_m = seg.spill_level_m or 0
+	if spill_m <= 0 then
+		return 0
+	end
+	-- Volume needed to fill the bowl to the spill rim.
+	local bowl_capacity_m3 = bowl_area_m2 * spill_m
+	if volume_m3 <= 0 then
+		return 0
+	end
+	if volume_m3 <= bowl_capacity_m3 then
+		return volume_m3 / bowl_area_m2
+	end
+	-- Above-spill overflow uses the actual flooded surface (previous tick) so
+	-- a wide flood doesn't keep raising the level once it spread out. Falls
+	-- back to bowl_area if we haven't run the flood-fill yet.
+	local area = surface_area_m2 > 0 and surface_area_m2 or bowl_area_m2
+	local overflow_m3 = volume_m3 - bowl_capacity_m3
+	return spill_m + overflow_m3 / area
+end
+
+-- Forward inverse of `level_from_volume`. Used by Budget.SetLevel so the player
+-- can ask for an instantaneous flood-to-height: we work backwards to the
+-- volume that would produce that level, then let the regular tick continue.
+local function volume_from_level(seg, level_m, bowl_area_m2, surface_area_m2)
+	if level_m <= 0 then
+		return 0
+	end
+	local spill_m = seg.spill_level_m or 0
+	if spill_m <= 0 then
+		return 0
+	end
+	if level_m <= spill_m then
+		return level_m * bowl_area_m2
+	end
+	local bowl_capacity_m3 = bowl_area_m2 * spill_m
+	local area = surface_area_m2 > 0 and surface_area_m2 or bowl_area_m2
+	return bowl_capacity_m3 + (level_m - spill_m) * area
+end
+
+-- ----------------------------------------------------------------------------
 -- Discharge controls (the "+ / -" buttons go through these)
 -- ----------------------------------------------------------------------------
 
@@ -138,53 +187,6 @@ function Budget.AdjustLevel(seg_id, delta_m)
 	end
 	local prev = seg.actual_level_m or 0
 	return Budget.SetLevel(seg_id, prev + (tonumber(delta_m) or 0))
-end
-
--- ----------------------------------------------------------------------------
--- Volume-to-level inversion
--- ----------------------------------------------------------------------------
-
--- Inverse of "how much water is in the basin given a level?". bowl_area_wu2 is
--- the segment's estimated bowl floor area; surface_area_wu2 is the spilled-
--- water surface area from the previous tick (or 0 if no spill yet).
-local function level_from_volume(seg, volume_m3, bowl_area_m2, surface_area_m2)
-	local spill_m = seg.spill_level_m or 0
-	if spill_m <= 0 then
-		return 0
-	end
-	-- Volume needed to fill the bowl to the spill rim.
-	local bowl_capacity_m3 = bowl_area_m2 * spill_m
-	if volume_m3 <= 0 then
-		return 0
-	end
-	if volume_m3 <= bowl_capacity_m3 then
-		return volume_m3 / bowl_area_m2
-	end
-	-- Above-spill overflow uses the actual flooded surface (previous tick) so
-	-- a wide flood doesn't keep raising the level once it spread out. Falls
-	-- back to bowl_area if we haven't run the flood-fill yet.
-	local area = surface_area_m2 > 0 and surface_area_m2 or bowl_area_m2
-	local overflow_m3 = volume_m3 - bowl_capacity_m3
-	return spill_m + overflow_m3 / area
-end
-
--- Forward inverse of `level_from_volume`. Used by Budget.SetLevel so the player
--- can ask for an instantaneous flood-to-height: we work backwards to the
--- volume that would produce that level, then let the regular tick continue.
-local function volume_from_level(seg, level_m, bowl_area_m2, surface_area_m2)
-	if level_m <= 0 then
-		return 0
-	end
-	local spill_m = seg.spill_level_m or 0
-	if spill_m <= 0 then
-		return 0
-	end
-	if level_m <= spill_m then
-		return level_m * bowl_area_m2
-	end
-	local bowl_capacity_m3 = bowl_area_m2 * spill_m
-	local area = surface_area_m2 > 0 and surface_area_m2 or bowl_area_m2
-	return bowl_capacity_m3 + (level_m - spill_m) * area
 end
 
 -- ----------------------------------------------------------------------------
