@@ -111,6 +111,19 @@ local function place_or_select_at(click_pt)
 		return nearby_id
 	end
 
+	-- Don't stack a new body on a tile that already has water (the sea, or
+	-- another lake): water bodies must not overlap. We read the live water grid
+	-- via the depth sampler -- anything wetter than "dry" here is rejected.
+	if Rivers.Depth and type(Rivers.Depth.SampleAt) == "function" then
+		local depth_m = Rivers.Depth.SampleAt(map, click_pt)
+		if type(depth_m) == "number" and depth_m > 0 then
+			DebugLog.Info(SCOPE, "placement blocked: already underwater", {
+				x = click_pt:x(), y = click_pt:y(), depth_m = depth_m,
+			})
+			return nil, "can't place water here -- this spot is already underwater"
+		end
+	end
+
 	-- New marker: drop one at the click point. Use a single-point "path" so the
 	-- existing API/state-tracking path keeps working. The carve module is NOT
 	-- invoked here; we only place a TerrainWaterObject.
@@ -230,6 +243,20 @@ local function route(budget_fn_name, value)
 		return nil, "Rivers.Budget module not loaded"
 	end
 	return fn(seg_id, value or 0)
+end
+
+-- Sea-level controls operate on "the sea" (not the current marker), so they go
+-- straight to Rivers.Sea rather than through route(). No-op if no sea exists.
+function Tool.GetSeaLevel()
+	return Rivers.Sea and Rivers.Sea.GetLevel and Rivers.Sea.GetLevel() or nil
+end
+function Tool.SetSeaLevel(v)
+	if not (Rivers.Sea and Rivers.Sea.SetCurrentLevel) then return nil, "Rivers.Sea not loaded" end
+	return Rivers.Sea.SetCurrentLevel(v)
+end
+function Tool.AdjustSeaLevel(d)
+	if not (Rivers.Sea and Rivers.Sea.AdjustLevel) then return nil, "Rivers.Sea not loaded" end
+	return Rivers.Sea.AdjustLevel(d)
 end
 
 function Tool.SetDischarge(v) return route("SetDischarge", v) end

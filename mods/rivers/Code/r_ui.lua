@@ -15,6 +15,7 @@
 --   │  surface: N m^2             │   <- read-only live water surface area
 --   │  [ Apply ] [ Clear All ]   │   <- Apply commits all typed field values
 --   │  [ Generate Sea ]          │   <- floods the whole map below a sea level
+--   │  sea level:   [__] [-][+]  │   <- global sea level in m (acts on the sea)
 --   │                            │
 --   │           RAIN             │   <- section label
 --   │  Rain: none                │   <- status (disaster preset / visual on)
@@ -94,6 +95,7 @@ local function destroy_panel()
 	Rivers.State.ui_infiltration_edit = false
 	Rivers.State.ui_volume_label = false
 	Rivers.State.ui_area_label = false
+	Rivers.State.ui_sealevel_edit = false
 end
 
 local function update_toggle_visual()
@@ -143,6 +145,16 @@ local function refresh_input_fields(seg)
 			local text = seg and format_float(seg[INPUT_FIELDS[i].seg_field] or 0, 2) or ""
 			pcall(function() edit:SetText(text) end)
 		end
+	end
+
+	-- Sea-level field mirrors the SEA (independent of the current marker); blank
+	-- when no sea exists. Tool.GetSeaLevel returns nil if there's no sea.
+	local sea_edit = Rivers.State.ui_sealevel_edit
+	if is_window_alive(sea_edit) and sea_edit ~= focused then
+		local Tool = Rivers.Tool
+		local lvl = Tool and Tool.GetSeaLevel and Tool.GetSeaLevel() or nil
+		local text = lvl and format_float(lvl, 2) or ""
+		pcall(function() sea_edit:SetText(text) end)
 	end
 end
 
@@ -528,6 +540,7 @@ function UI.Show()
 		{ state_key = "ui_drainage_edit", setter = "SetDrainage" },
 		{ state_key = "ui_evaporation_edit", setter = "SetEvaporation" },
 		{ state_key = "ui_infiltration_edit", setter = "SetInfiltration" },
+		{ state_key = "ui_sealevel_edit", setter = "SetSeaLevel" },
 	}
 	make_button(action_row, "Apply", function()
 		if not Rivers.Tool then return end
@@ -552,14 +565,31 @@ function UI.Show()
 	end, { halign = "stretch", min_width = 100, max_width = 140 })
 
 	-- Generate Sea: floods the whole map below a global sea level (one static,
-	-- engine-managed body). Becomes the current source, so the height field then
-	-- adjusts the sea level.
+	-- engine-managed body). Blocked while any other water exists.
 	make_button(panel, "Generate Sea", function()
 		if Rivers.Sea and type(Rivers.Sea.Generate) == "function" then
 			Rivers.Sea.Generate()
 		end
 		UI.Refresh()
 	end)
+
+	-- Sea level row: dedicated control for the sea's global level (m above the
+	-- map's lowest terrain). -/+ adjust it live; Apply commits a typed value.
+	-- Acts on the sea regardless of which marker is selected; inert if no sea.
+	local sealevel_edit = make_param_row({
+		id = "RiversSeaLevelRow",
+		label = "sea level:",
+		max_value = (Rivers.Config and Rivers.Config.SEA_LEVEL_MAX_M) or 200,
+		step = (Rivers.Config and Rivers.Config.SEA_LEVEL_STEP_M) or 1,
+		hint = "m",
+	}, function(delta)
+		Rivers.Tool.AdjustSeaLevel(delta)
+	end)
+	if sealevel_edit then
+		Rivers.State.ui_sealevel_edit = sealevel_edit
+	else
+		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, sea level field omitted")
+	end
 
 	-- Rain section
 	x_label:new({

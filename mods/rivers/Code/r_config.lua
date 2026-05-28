@@ -163,6 +163,8 @@ config.FloodScanMarginMeters = 50           -- padding around segment bbox for t
 --                      accurate readouts, more GetHeight calls at generation.
 config.SeaLevelMeters = 10
 config.SeaScanSamples = 64
+config.SeaLevelStepMeters = 1     -- sea-level field + / - step (m)
+config.SeaLevelMaxMeters = 200    -- soft cap on the sea-level input field
 
 -- ============================================================================
 -- SAFETY
@@ -271,6 +273,8 @@ C.FLOOD_SCAN_MARGIN_M = as_number(config.FloodScanMarginMeters, 50)
 
 C.SEA_LEVEL_METERS = as_number(config.SeaLevelMeters, 10)
 C.SEA_SCAN_SAMPLES = as_number(config.SeaScanSamples, 64)
+C.SEA_LEVEL_STEP_M = as_number(config.SeaLevelStepMeters, 1)
+C.SEA_LEVEL_MAX_M = as_number(config.SeaLevelMaxMeters, 200)
 
 C.DEBUG_LOGS = as_bool(config.DebugLogs)
 C.DEBUG_INIT = as_bool(config.DebugInit)

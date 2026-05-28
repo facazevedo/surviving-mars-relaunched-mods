@@ -101,6 +101,22 @@ end
 -- Generate
 -- ----------------------------------------------------------------------------
 
+-- Find the existing sea segment (there is at most one). Returns seg_id, seg.
+function Sea.Find()
+	for id, seg in pairs(Rivers.State.segments) do
+		if seg.is_sea then
+			return id, seg
+		end
+	end
+	return nil
+end
+
+-- Are there any water bodies at all (sea or lake)? Used to enforce that a sea
+-- and lakes never coexist.
+local function any_segment_exists()
+	return next(Rivers.State.segments) ~= nil
+end
+
 function Sea.Generate(level_m)
 	if config().ENABLE_MOD ~= true then
 		DebugLog.Warn(SCOPE, "Generate called but ENABLE_MOD is false")
@@ -113,6 +129,12 @@ function Sea.Generate(level_m)
 	local Water = Rivers.Water
 	if not Water or type(Water.PlaceMarker) ~= "function" then
 		return nil, "Rivers.Water module not loaded"
+	end
+	-- A sea is map-wide, so it must not coexist with lakes (or a second sea).
+	-- The player clears existing water first.
+	if any_segment_exists() then
+		DebugLog.Warn(SCOPE, "Generate blocked: water already exists")
+		return nil, "clear all water before generating a sea"
 	end
 
 	local cfg = config()
@@ -232,6 +254,26 @@ function Sea.SetLevel(seg_id, level_m)
 
 	DebugLog.Info(SCOPE, "SetLevel", { id = seg_id, level_m = v })
 	return v
+end
+
+-- Convenience wrappers that operate on "the sea" (whichever segment is the sea)
+-- so the UI's sea-level field doesn't need the segment id. Return nil if no sea.
+function Sea.GetLevel()
+	local _id, seg = Sea.Find()
+	if not seg then return nil end
+	return seg.actual_level_m or 0
+end
+
+function Sea.SetCurrentLevel(level_m)
+	local id = Sea.Find()
+	if not id then return nil, "no sea exists" end
+	return Sea.SetLevel(id, level_m)
+end
+
+function Sea.AdjustLevel(delta_m)
+	local id, seg = Sea.Find()
+	if not id then return nil, "no sea exists" end
+	return Sea.SetLevel(id, (seg.actual_level_m or 0) + (tonumber(delta_m) or 0))
 end
 
 Rivers.Sea = Sea
