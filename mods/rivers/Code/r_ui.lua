@@ -6,7 +6,8 @@
 --   ├────────────────────────────┤
 --   │  [ Activate Water Mode ]   │   <- toggle (changes label when active)
 --   │  flow N m^3/s | lvl N m... │   <- current source: discharge, level, class, flooded tiles
---   │  [ - ]            [ + ]    │   <- discharge -/+ (m^3/s, step = HYDRO_DISCHARGE_STEP_M3S)
+--   │  [ - ]            [ + ]    │   <- discharge -/+ (hold to repeat; step = HYDRO_DISCHARGE_STEP_M3S)
+--   │  flow:  [_______]          │   <- type m^3/s, Enter to apply (XNumberEdit)
 --   │  [ Clear All Water ]       │
 --   │                            │
 --   │           RAIN             │   <- section label
@@ -80,6 +81,7 @@ local function destroy_panel()
 	Rivers.State.ui_toggle_button = false
 	Rivers.State.ui_level_label = false
 	Rivers.State.ui_rain_label = false
+	Rivers.State.ui_flow_edit = false
 end
 
 local function update_toggle_visual()
@@ -152,6 +154,11 @@ local function make_button(parent, label, on_press, opts)
 	opts = opts or {}
 	local x_button = rawget(_G, "XTextButton")
 	if not x_button then return nil end
+	-- RepeatStart > 0 makes XButton auto-fire OnPress while the mouse stays
+	-- pressed on the button: after RepeatStart ms it begins firing, then
+	-- every RepeatInterval ms thereafter (see XButton.lua:119). We expose this
+	-- through opts.repeat_start / opts.repeat_interval so the +/- buttons can
+	-- opt in and discrete actions (Clear All, Activate, etc.) stay single-shot.
 	local btn = x_button:new({
 		Text = label,
 		Translate = false,
@@ -169,9 +176,58 @@ local function make_button(parent, label, on_press, opts)
 		FocusedBackground = BUTTON_ROLLOVER,
 		RolloverBackground = BUTTON_ROLLOVER,
 		PressedBackground = BUTTON_ROLLOVER,
+		RepeatStart = opts.repeat_start or 0,
+		RepeatInterval = opts.repeat_interval or 0,
 	}, parent)
 	btn.OnPress = function() pcall(on_press) end
 	return btn
+end
+
+-- Attach a single-line XNumberEdit to `parent`. on_enter(number) fires when
+-- the user finishes typing and presses Enter. Returns the edit handle (or nil
+-- if XNumberEdit is unavailable for any reason -- the caller can decide whether
+-- that is fatal).
+local function make_number_edit(parent, opts, on_enter)
+	opts = opts or {}
+	local x_number = rawget(_G, "XNumberEdit")
+	if not x_number then return nil end
+	local edit = x_number:new({
+		Translate = false,
+		TextStyle = "ConsoleLog",
+		HAlign = opts.halign or "stretch",
+		MinWidth = opts.min_width or 100,
+		MaxWidth = opts.max_width or 140,
+		MinHeight = ROW_HEIGHT,
+		MaxHeight = ROW_HEIGHT,
+		Padding = box(6, 2, 6, 2),
+		Background = BUTTON_BACKGROUND,
+		BorderColor = TEXT_COLOR,
+		IsInRange = true,
+		MinValue = opts.min_value or 0,
+		MaxValue = opts.max_value or 1000,
+		Hint = opts.hint,
+	}, parent)
+	-- Enter on a single-line XEdit is in the vkPass list (see XTextEditor.lua:90)
+	-- so OnKbdKeyDown receives it without the base class swallowing it first.
+	-- We intercept Enter, read the parsed number, call on_enter, and consume the
+	-- key so it doesn't bleed into game shortcuts.
+	local const_table = rawget(_G, "const") or {}
+	local enter_vk = const_table.vkEnter
+	edit.OnKbdKeyDown = function(self, virtual_key, repeated)
+		if virtual_key == enter_vk and not repeated then
+			local n = self:GetNumber()
+			if type(n) == "number" then
+				pcall(on_enter, n)
+				if type(self.SetFocus) == "function" then
+					pcall(function() self:SetFocus(false) end)
+				end
+				return "break"
+			end
+		end
+		-- Defer to the base XTextEditor handler for everything else.
+		return x_number.OnKbdKeyDown(self, virtual_key, repeated)
+	end
+	return edit
 end
 
 -- ----------------------------------------------------------------------------
@@ -254,19 +310,71 @@ function UI.Show()
 		MaxWidth = 260,
 	}, panel)
 
+	local repeat_start = (Rivers.Config and Rivers.Config.HYDRO_BUTTON_REPEAT_START_MS) or 300
+	local repeat_interval = (Rivers.Config and Rivers.Config.HYDRO_BUTTON_REPEAT_INTERVAL_MS) or 150
+
 	make_button(minus_plus_row, "  -  ", function()
 		if not Rivers.Tool then return end
 		local step = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_STEP_M3S) or 0.5
 		Rivers.Tool.AdjustDischarge(-step)
 		UI.Refresh()
-	end, { halign = "stretch", min_width = 100, max_width = 120 })
+	end, {
+		halign = "stretch", min_width = 100, max_width = 120,
+		repeat_start = repeat_start, repeat_interval = repeat_interval,
+	})
 
 	make_button(minus_plus_row, "  +  ", function()
 		if not Rivers.Tool then return end
 		local step = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_STEP_M3S) or 0.5
 		Rivers.Tool.AdjustDischarge(step)
 		UI.Refresh()
-	end, { halign = "stretch", min_width = 100, max_width = 120 })
+	end, {
+		halign = "stretch", min_width = 100, max_width = 120,
+		repeat_start = repeat_start, repeat_interval = repeat_interval,
+	})
+
+	-- Flow input row: "flow:" label + numeric edit. Pressing Enter while focus
+	-- is in the edit sets the source discharge to the typed value.
+	local flow_row = x_window:new({
+		Id = "RiversFlowInputRow",
+		LayoutMethod = "HList",
+		LayoutHSpacing = 8,
+		HAlign = "stretch",
+		MinWidth = 220,
+		MaxWidth = 260,
+	}, panel)
+
+	x_label:new({
+		Text = "flow:",
+		Translate = false,
+		TextStyle = "ConsoleLog",
+		TextColor = TEXT_COLOR,
+		HAlign = "left",
+		VAlign = "center",
+		MinWidth = 60,
+		MaxWidth = 60,
+		MinHeight = ROW_HEIGHT,
+		MaxHeight = ROW_HEIGHT,
+	}, flow_row)
+
+	local max_flow = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_MAX_M3S) or 100
+	local flow_edit = make_number_edit(flow_row, {
+		halign = "stretch",
+		min_width = 140,
+		max_width = 180,
+		min_value = 0,
+		max_value = max_flow,
+		hint = "m^3/s, Enter to apply",
+	}, function(value)
+		if not Rivers.Tool then return end
+		Rivers.Tool.SetDischarge(value)
+		UI.Refresh()
+	end)
+	if flow_edit then
+		Rivers.State.ui_flow_edit = flow_edit
+	else
+		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, flow input field omitted")
+	end
 
 	-- Clear All
 	make_button(panel, "Clear All Water", function()

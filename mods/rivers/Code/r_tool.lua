@@ -226,6 +226,24 @@ function Tool.AdjustDischarge(delta_m3s)
 	return Rivers.Budget.AdjustDischarge(seg_id, delta_m3s or 0)
 end
 
+-- Used by the UI flow input field when the player types a number and hits
+-- Enter. value_m3s is clamped to >= 0 by Budget.SetDischarge.
+function Tool.SetDischarge(value_m3s)
+	local seg_id = Rivers.State.current_marker_segment
+	if not seg_id then
+		return nil, "no current marker (click a hole first)"
+	end
+	local seg = Rivers.State.segments[seg_id]
+	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
+		clear_current()
+		return nil, "current marker is gone"
+	end
+	if not Rivers.Budget or type(Rivers.Budget.SetDischarge) ~= "function" then
+		return nil, "Rivers.Budget module not loaded"
+	end
+	return Rivers.Budget.SetDischarge(seg_id, value_m3s or 0)
+end
+
 -- ----------------------------------------------------------------------------
 -- Overlay (only exists while tool is active)
 -- ----------------------------------------------------------------------------
