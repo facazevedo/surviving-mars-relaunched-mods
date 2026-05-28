@@ -273,6 +273,12 @@ function Budget.Tick(map, dt_s)
 	for _id, seg in pairs(Rivers.State.segments) do
 		tick_segment(map, seg, dt_s, cfg)
 	end
+	-- The status label + the live input fields need a Refresh to reflect the
+	-- new volume/level/discharge values. Refresh is cheap and gated on
+	-- is_window_alive, so calling it every tick is safe even with no panel.
+	if Rivers.UI and type(Rivers.UI.Refresh) == "function" then
+		Rivers.UI.Refresh()
+	end
 end
 
 -- ----------------------------------------------------------------------------

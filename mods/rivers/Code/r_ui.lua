@@ -6,8 +6,8 @@
 --   ├────────────────────────────┤
 --   │  [ Activate Water Mode ]   │   <- toggle (changes label when active)
 --   │  flow N m^3/s | lvl N m... │   <- status: discharge, level, class, flooded tiles
---   │  flow:   [____]  [-] [+]   │   <- discharge in m^3/s; -/+ hold-to-repeat
---   │  height: [____]  [-] [+]   │   <- instant water level in m; -/+ hold-to-repeat
+--   │  height: [____]  [-] [+]   │   <- instant water level in m (live)
+--   │  flow:   [____]  [-] [+]   │   <- discharge in m^3/s (live)
 --   │  [ Apply ] [ Clear All ]   │   <- Apply commits both typed values to the current source
 --   │                            │
 --   │           RAIN             │   <- section label
@@ -102,8 +102,37 @@ local function format_float(n, decimals)
 	return tostring(r)
 end
 
+-- Push the segment's current discharge / level into the input fields. We only
+-- write a field that does NOT currently hold keyboard focus -- otherwise we'd
+-- clobber what the player is typing mid-keystroke. The check uses the global
+-- GetKeyboardFocus() (XDesktop.lua:144); if it isn't available we err on the
+-- side of not touching the field, which is the safe direction.
+local function refresh_input_fields(seg)
+	local get_focus = rawget(_G, "GetKeyboardFocus")
+	local focused = type(get_focus) == "function" and get_focus() or nil
+
+	local flow_edit = Rivers.State.ui_flow_edit
+	if is_window_alive(flow_edit) and flow_edit ~= focused then
+		local text = seg and format_float(seg.discharge_m3s or 0, 2) or ""
+		pcall(function() flow_edit:SetText(text) end)
+	end
+
+	local height_edit = Rivers.State.ui_height_edit
+	if is_window_alive(height_edit) and height_edit ~= focused then
+		local text = seg and format_float(seg.actual_level_m or 0, 2) or ""
+		pcall(function() height_edit:SetText(text) end)
+	end
+end
+
 local function update_level_label()
 	local label = Rivers.State.ui_level_label
+	local seg_id = Rivers.State.current_marker_segment
+	local seg = seg_id and Rivers.State.segments[seg_id] or nil
+
+	-- Keep the input fields live first; do this whether or not the status
+	-- label exists, since the fields can survive a missing label.
+	refresh_input_fields(seg)
+
 	if not is_window_alive(label) then return end
 	local Tool = Rivers.Tool
 	if not (Tool and Tool.GetCurrentDischarge) then
@@ -117,8 +146,6 @@ local function update_level_label()
 	end
 	local level = Tool.GetCurrentLevel() or 0
 	local class = Tool.GetCurrentDepthClass() or "dry"
-	local seg_id = Rivers.State.current_marker_segment
-	local seg = seg_id and Rivers.State.segments[seg_id] or nil
 	local tiles = seg and seg.flooded_tile_count or 0
 	local text = "flow " .. format_float(discharge, 2) .. " m^3/s  |  level " ..
 		format_float(level, 2) .. " m (" .. class .. ")  |  flooded " .. tostring(tiles) .. " tiles"
@@ -346,6 +373,27 @@ function UI.Show()
 		return edit
 	end
 
+	-- Height row: instant water level in meters above the bowl floor. -/+
+	-- snaps the level immediately via Budget.SetLevel (volume inverted from
+	-- the new level), bypassing the rate-limited budget chase. The field
+	-- itself is live -- update_level_label rewrites it each refresh from the
+	-- segment's actual_level_m, so the value reflects what the budget tick
+	-- is doing over time (e.g. drains back down when flow < losses).
+	local height_edit = make_param_row({
+		id = "RiversHeightRow",
+		label = "height:",
+		max_value = (Rivers.Config and Rivers.Config.HYDRO_LEVEL_MAX_M) or 50,
+		step = (Rivers.Config and Rivers.Config.HYDRO_LEVEL_STEP_M) or 0.5,
+		hint = "m",
+	}, function(delta)
+		Rivers.Tool.AdjustLevel(delta)
+	end)
+	if height_edit then
+		Rivers.State.ui_height_edit = height_edit
+	else
+		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, height input field omitted")
+	end
+
 	-- Flow row: discharge in m^3/s. -/+ adjusts the source's inflow rate.
 	local flow_edit = make_param_row({
 		id = "RiversFlowRow",
@@ -360,24 +408,6 @@ function UI.Show()
 		Rivers.State.ui_flow_edit = flow_edit
 	else
 		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, flow input field omitted")
-	end
-
-	-- Height row: instant water level in meters above the bowl floor. -/+
-	-- snaps the level immediately via Budget.SetLevel (volume inverted from
-	-- the new level), bypassing the rate-limited budget chase.
-	local height_edit = make_param_row({
-		id = "RiversHeightRow",
-		label = "height:",
-		max_value = (Rivers.Config and Rivers.Config.HYDRO_LEVEL_MAX_M) or 50,
-		step = (Rivers.Config and Rivers.Config.HYDRO_LEVEL_STEP_M) or 0.5,
-		hint = "m",
-	}, function(delta)
-		Rivers.Tool.AdjustLevel(delta)
-	end)
-	if height_edit then
-		Rivers.State.ui_height_edit = height_edit
-	else
-		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, height input field omitted")
 	end
 
 	-- Apply + Clear All row: Apply reads the flow_edit value and pushes it to
