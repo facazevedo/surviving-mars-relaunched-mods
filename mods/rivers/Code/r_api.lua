@@ -39,13 +39,6 @@ local function current_map()
 	return m
 end
 
-local function next_segment_id()
-	local state = Rivers.State
-	local id = "rv_" .. tostring(state.next_id)
-	state.next_id = state.next_id + 1
-	return id
-end
-
 local function path_center(points)
 	local sumx, sumy, n = 0, 0, #points
 	for i = 1, n do
@@ -112,15 +105,14 @@ function Rivers.Create(path, params)
 		return nil, err2
 	end
 
-	local id = next_segment_id()
-	Rivers.State.segments[id] = {
+	local id = Rivers.State:RegisterSegment({
 		water_obj = obj,
 		bbox = bbox,
 		floor_wu = floor_wu,
 		marker_x = marker_pt:x(),
 		marker_y = marker_pt:y(),
 		water_level_m = water_level_m,
-	}
+	})
 	DebugLog.Info(SCOPE, "Create ok", {
 		id = id,
 		points = #points,

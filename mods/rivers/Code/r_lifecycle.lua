@@ -21,6 +21,12 @@ end
 local DebugLog = Rivers.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
 local SCOPE = "Lifecycle"
 
+-- Patch-identity guard: bump when the OnMsg hook closures below change so a
+-- hot-reload of the mod can detect a stale hook registration and refuse to
+-- double-install. Logged on Enable() so reload diagnostics show the version
+-- that registered the live hooks.
+local PATCH_VERSION = 1
+
 local Lifecycle = {}
 
 function Lifecycle.Enable()
@@ -36,7 +42,7 @@ function Lifecycle.Enable()
 	end
 	Rivers.State.enabled = true
 	DebugLog.Info(SCOPE, "Enable: ready", {
-		patch_version = Rivers.LIFECYCLE_PATCH_VERSION,
+		patch_version = PATCH_VERSION,
 	})
 	return true
 end

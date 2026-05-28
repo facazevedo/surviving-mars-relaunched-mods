@@ -1,38 +1,38 @@
 return {
 	PlaceObj('ModItemCode', {
-		'name', "RiversVersion",
-		'CodeFileName', "Code/r_version.lua",
+		'name', "r_state",
+		'CodeFileName', "Code/r_state.lua",
 	}),
 	PlaceObj('ModItemCode', {
-		'name', "RiversConfig",
+		'name', "r_config",
 		'CodeFileName', "Code/r_config.lua",
 	}),
 	PlaceObj('ModItemCode', {
-		'name', "RiversDebug",
+		'name', "r_debug",
 		'CodeFileName', "Code/r_debug.lua",
 	}),
 	PlaceObj('ModItemCode', {
-		'name', "RiversTerrain",
+		'name', "r_terrain",
 		'CodeFileName', "Code/r_terrain.lua",
 	}),
 	PlaceObj('ModItemCode', {
-		'name', "RiversWater",
+		'name', "r_water",
 		'CodeFileName', "Code/r_water.lua",
 	}),
 	PlaceObj('ModItemCode', {
-		'name', "RiversAPI",
+		'name', "r_api",
 		'CodeFileName', "Code/r_api.lua",
 	}),
 	PlaceObj('ModItemCode', {
-		'name', "RiversTool",
+		'name', "r_tool",
 		'CodeFileName', "Code/r_tool.lua",
 	}),
 	PlaceObj('ModItemCode', {
-		'name', "RiversUI",
+		'name', "r_ui",
 		'CodeFileName', "Code/r_ui.lua",
 	}),
 	PlaceObj('ModItemCode', {
-		'name', "RiversLifecycle",
+		'name', "r_lifecycle",
 		'CodeFileName', "Code/r_lifecycle.lua",
 	}),
 	PlaceObj('ModItemCode', {

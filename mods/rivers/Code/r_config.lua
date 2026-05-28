@@ -88,10 +88,13 @@ config.MaxStepsPerSegment = 512     -- refuse path segments longer than this man
 -- ============================================================================
 -- DEBUG LOGGING
 -- ============================================================================
--- DEBUG_LOGS gates all log output. Scoped flags (DEBUG_<SCOPE>) can be set to
--- false to silence a specific scope while DEBUG_LOGS stays on. Scopes used in
--- this mod: "Init", "Lifecycle", "API", "Terrain", "Water".
+-- DebugLogs gates all log output. Scoped flags (Debug<Scope>) can be set to
+-- false to silence one scope while DebugLogs stays on. Scopes emitted by this
+-- mod: "Init", "Lifecycle", "API", "Terrain", "Water", "Tool", "UI".
 config.DebugLogs = true
+config.DebugInit = true
+config.DebugLifecycle = true
+config.DebugApi = true
 config.DebugTerrain = true
 config.DebugWater = true
 config.DebugTool = true
@@ -142,6 +145,9 @@ C.MAX_PATH_POINTS = as_number(config.MaxPathPoints, 64)
 C.MAX_STEPS_PER_SEGMENT = as_number(config.MaxStepsPerSegment, 512)
 
 C.DEBUG_LOGS = as_bool(config.DebugLogs)
+C.DEBUG_INIT = as_bool(config.DebugInit)
+C.DEBUG_LIFECYCLE = as_bool(config.DebugLifecycle)
+C.DEBUG_API = as_bool(config.DebugApi)
 C.DEBUG_TERRAIN = as_bool(config.DebugTerrain)
 C.DEBUG_WATER = as_bool(config.DebugWater)
 C.DEBUG_TOOL = as_bool(config.DebugTool)

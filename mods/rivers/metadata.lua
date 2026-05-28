@@ -8,7 +8,7 @@ return PlaceObj('ModDef', {
 	'lua_revision', 350453,
 	'saved_with_revision', 380799,
 	'code', {
-		"Code/r_version.lua",
+		"Code/r_state.lua",
 		"Code/r_config.lua",
 		"Code/r_debug.lua",
 		"Code/r_terrain.lua",

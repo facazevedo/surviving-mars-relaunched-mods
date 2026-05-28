@@ -132,17 +132,14 @@ local function place_or_select_at(click_pt)
 		return nil, err
 	end
 
-	local state = Rivers.State
-	local id = "rv_" .. tostring(state.next_id)
-	state.next_id = state.next_id + 1
-	state.segments[id] = {
+	local id = Rivers.State:RegisterSegment({
 		water_obj = obj,
 		bbox = bbox,
 		floor_wu = floor_wu,
 		marker_x = click_pt:x(),
 		marker_y = click_pt:y(),
 		water_level_m = start_level_m,
-	}
+	})
 	set_current(id, obj)
 	DebugLog.Info(SCOPE, "placed new marker", {
 		id = id,
