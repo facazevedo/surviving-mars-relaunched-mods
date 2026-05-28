@@ -141,6 +141,7 @@ local function place_or_select_at(click_pt)
 	local bowl_area_m2 = bowl_area_wu2 / (guim * guim)
 	local initial_volume_m3 = bowl_area_m2 * start_level_m
 	local initial_discharge = cfg.HYDRO_INITIAL_DISCHARGE_M3S or 0
+	local initial_outflow = cfg.HYDRO_INITIAL_OUTFLOW_M3S or 0
 
 	local id = Rivers.State:RegisterSegment({
 		water_obj = obj,
@@ -151,6 +152,7 @@ local function place_or_select_at(click_pt)
 		spill_level_m = start_level_m,
 		bowl_area_wu2 = bowl_area_wu2,
 		discharge_m3s = initial_discharge,
+		outflow_m3s = initial_outflow,
 		volume_m3 = initial_volume_m3,
 		actual_level_m = start_level_m,
 		flooded_tile_count = 0,
@@ -190,6 +192,14 @@ function Tool.GetCurrentDischarge()
 	local seg = Rivers.State.segments[seg_id]
 	if not seg then return nil end
 	return seg.discharge_m3s or 0
+end
+
+function Tool.GetCurrentOutflow()
+	local seg_id = Rivers.State.current_marker_segment
+	if not seg_id then return nil end
+	local seg = Rivers.State.segments[seg_id]
+	if not seg then return nil end
+	return seg.outflow_m3s or 0
 end
 
 function Tool.GetCurrentLevel()
@@ -242,6 +252,40 @@ function Tool.SetDischarge(value_m3s)
 		return nil, "Rivers.Budget module not loaded"
 	end
 	return Rivers.Budget.SetDischarge(seg_id, value_m3s or 0)
+end
+
+-- Outflow-row +/- buttons and the Apply button route here. value_m3s is the
+-- drain rate; clamped to >= 0 by Budget.SetOutflow.
+function Tool.SetOutflow(value_m3s)
+	local seg_id = Rivers.State.current_marker_segment
+	if not seg_id then
+		return nil, "no current marker (click a hole first)"
+	end
+	local seg = Rivers.State.segments[seg_id]
+	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
+		clear_current()
+		return nil, "current marker is gone"
+	end
+	if not Rivers.Budget or type(Rivers.Budget.SetOutflow) ~= "function" then
+		return nil, "Rivers.Budget module not loaded"
+	end
+	return Rivers.Budget.SetOutflow(seg_id, value_m3s or 0)
+end
+
+function Tool.AdjustOutflow(delta_m3s)
+	local seg_id = Rivers.State.current_marker_segment
+	if not seg_id then
+		return nil, "no current marker (click a hole first)"
+	end
+	local seg = Rivers.State.segments[seg_id]
+	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
+		clear_current()
+		return nil, "current marker is gone"
+	end
+	if not Rivers.Budget or type(Rivers.Budget.AdjustOutflow) ~= "function" then
+		return nil, "Rivers.Budget module not loaded"
+	end
+	return Rivers.Budget.AdjustOutflow(seg_id, delta_m3s or 0)
 end
 
 -- The height-row +/- buttons and the Apply button both flow through here.

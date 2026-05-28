@@ -107,23 +107,24 @@ config.DepthSubmergedMeters = 2.00
 -- HYDROLOGY -- per-source water budget
 -- ============================================================================
 -- Each river segment runs a discrete water budget instead of a fixed level:
---   volume += (discharge - evap*surface_area - infil*flooded_area) * dt
--- where dt is HydroTickIntervalMs. discharge is the player-controlled inflow,
--- modified by `+` / `-` in the water tool by HydroDischargeStepM3S per press.
--- Rates are intentionally tunable; defaults are conservative so a brand-new
--- segment with discharge=0 drains gradually rather than holding water forever.
+--   volume += (inflow - outflow - evap*surface_area - infil*flooded_area) * dt
+-- where dt is HydroTickIntervalMs. inflow (discharge) and outflow are both
+-- player-controlled per-segment fields, each with its own +/- buttons stepping
+-- by HydroDischargeStepM3S / HydroOutflowStepM3S. The level rises when
+-- inflow exceeds outflow + passive losses, and recedes otherwise.
 config.HydroTickIntervalMs = 1000           -- budget tick period (ms)
-config.HydroDischargeStepM3S = 0.5          -- flow + / - step (m^3/s)
-config.HydroDischargeMaxM3S = 100           -- soft cap on the flow input field
-config.HydroInitialDischargeM3S = 0         -- discharge of a freshly created segment
+config.HydroDischargeStepM3S = 0.5          -- inflow + / - step (m^3/s)
+config.HydroDischargeMaxM3S = 100           -- soft cap on the inflow input field
+config.HydroInitialDischargeM3S = 0         -- inflow of a freshly created segment
+config.HydroOutflowStepM3S = 0.5            -- outflow + / - step (m^3/s)
+config.HydroOutflowMaxM3S = 100             -- soft cap on the outflow input field
+config.HydroInitialOutflowM3S = 0           -- outflow of a freshly created segment
 config.HydroLevelStepMeters = 0.5           -- height + / - step (m), bypasses the budget
 config.HydroLevelMaxMeters = 50             -- soft cap on the height input field
 config.HydroButtonRepeatStartMs = 300       -- delay before a held +/- button starts auto-firing
 config.HydroButtonRepeatIntervalMs = 150    -- gap between subsequent fires while held
 config.HydroEvaporationMPerSec = 0.00005    -- meters lost per second per m^2 of surface
 config.HydroInfiltrationMPerSec = 0.00002   -- meters lost per second per m^2 of flooded area
-config.HydroOutletCapacityM3S = 5           -- max passive drain when level > spill
-config.HydroOverflowFactor = 1              -- multiplier on outlet drain when above spill
 
 -- ============================================================================
 -- HYDROLOGY -- connected flood-fill
@@ -221,14 +222,15 @@ C.HYDRO_TICK_INTERVAL_MS = as_number(config.HydroTickIntervalMs, 1000)
 C.HYDRO_DISCHARGE_STEP_M3S = as_number(config.HydroDischargeStepM3S, 0.5)
 C.HYDRO_DISCHARGE_MAX_M3S = as_number(config.HydroDischargeMaxM3S, 100)
 C.HYDRO_INITIAL_DISCHARGE_M3S = as_number(config.HydroInitialDischargeM3S, 0)
+C.HYDRO_OUTFLOW_STEP_M3S = as_number(config.HydroOutflowStepM3S, 0.5)
+C.HYDRO_OUTFLOW_MAX_M3S = as_number(config.HydroOutflowMaxM3S, 100)
+C.HYDRO_INITIAL_OUTFLOW_M3S = as_number(config.HydroInitialOutflowM3S, 0)
 C.HYDRO_LEVEL_STEP_M = as_number(config.HydroLevelStepMeters, 0.5)
 C.HYDRO_LEVEL_MAX_M = as_number(config.HydroLevelMaxMeters, 50)
 C.HYDRO_BUTTON_REPEAT_START_MS = as_number(config.HydroButtonRepeatStartMs, 300)
 C.HYDRO_BUTTON_REPEAT_INTERVAL_MS = as_number(config.HydroButtonRepeatIntervalMs, 150)
 C.HYDRO_EVAPORATION_M_PER_SEC = as_number(config.HydroEvaporationMPerSec, 0.00005)
 C.HYDRO_INFILTRATION_M_PER_SEC = as_number(config.HydroInfiltrationMPerSec, 0.00002)
-C.HYDRO_OUTLET_CAPACITY_M3S = as_number(config.HydroOutletCapacityM3S, 5)
-C.HYDRO_OVERFLOW_FACTOR = as_number(config.HydroOverflowFactor, 1)
 
 C.FLOOD_TILE_SIZE_M = as_number(config.FloodTileSizeMeters, 5)
 C.FLOOD_MAX_TILES = as_number(config.FloodMaxTiles, 5000)

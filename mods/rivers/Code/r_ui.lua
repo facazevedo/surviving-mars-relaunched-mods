@@ -5,10 +5,11 @@
 --   │           RIVERS           │   <- title
 --   ├────────────────────────────┤
 --   │  [ Activate Water Mode ]   │   <- toggle (changes label when active)
---   │  flow N m^3/s | lvl N m... │   <- status: discharge, level, class, flooded tiles
---   │  height: [____]  [-] [+]   │   <- instant water level in m (live)
---   │  flow:   [____]  [-] [+]   │   <- discharge in m^3/s (live)
---   │  [ Apply ] [ Clear All ]   │   <- Apply commits both typed values to the current source
+--   │  shallow | flooded N tiles │   <- status: depth class + flooded tile count
+--   │  height (lvl): [__] [-][+] │   <- instant water level in m (live)
+--   │  inflow:  [__]      [-][+] │   <- source discharge in m^3/s (live)
+--   │  outflow: [__]      [-][+] │   <- drain in m^3/s (live)
+--   │  [ Apply ] [ Clear All ]   │   <- Apply commits all three typed values
 --   │                            │
 --   │           RAIN             │   <- section label
 --   │  Rain: none                │   <- status (disaster preset / visual on)
@@ -83,6 +84,7 @@ local function destroy_panel()
 	Rivers.State.ui_rain_label = false
 	Rivers.State.ui_flow_edit = false
 	Rivers.State.ui_height_edit = false
+	Rivers.State.ui_outflow_edit = false
 end
 
 local function update_toggle_visual()
@@ -111,16 +113,22 @@ local function refresh_input_fields(seg)
 	local get_focus = rawget(_G, "GetKeyboardFocus")
 	local focused = type(get_focus) == "function" and get_focus() or nil
 
+	local height_edit = Rivers.State.ui_height_edit
+	if is_window_alive(height_edit) and height_edit ~= focused then
+		local text = seg and format_float(seg.actual_level_m or 0, 2) or ""
+		pcall(function() height_edit:SetText(text) end)
+	end
+
 	local flow_edit = Rivers.State.ui_flow_edit
 	if is_window_alive(flow_edit) and flow_edit ~= focused then
 		local text = seg and format_float(seg.discharge_m3s or 0, 2) or ""
 		pcall(function() flow_edit:SetText(text) end)
 	end
 
-	local height_edit = Rivers.State.ui_height_edit
-	if is_window_alive(height_edit) and height_edit ~= focused then
-		local text = seg and format_float(seg.actual_level_m or 0, 2) or ""
-		pcall(function() height_edit:SetText(text) end)
+	local outflow_edit = Rivers.State.ui_outflow_edit
+	if is_window_alive(outflow_edit) and outflow_edit ~= focused then
+		local text = seg and format_float(seg.outflow_m3s or 0, 2) or ""
+		pcall(function() outflow_edit:SetText(text) end)
 	end
 end
 
@@ -134,21 +142,17 @@ local function update_level_label()
 	refresh_input_fields(seg)
 
 	if not is_window_alive(label) then return end
+	-- The numeric level / inflow / outflow now live in the input fields below,
+	-- so the status line only reports what those fields don't: the water depth
+	-- class at the source and how many tiles are currently flooded.
+	if not seg then
+		pcall(function() label:SetText("Click a hole to start") end)
+		return
+	end
 	local Tool = Rivers.Tool
-	if not (Tool and Tool.GetCurrentDischarge) then
-		pcall(function() label:SetText("Click a hole to start") end)
-		return
-	end
-	local discharge = Tool.GetCurrentDischarge()
-	if not discharge then
-		pcall(function() label:SetText("Click a hole to start") end)
-		return
-	end
-	local level = Tool.GetCurrentLevel() or 0
-	local class = Tool.GetCurrentDepthClass() or "dry"
-	local tiles = seg and seg.flooded_tile_count or 0
-	local text = "flow " .. format_float(discharge, 2) .. " m^3/s  |  level " ..
-		format_float(level, 2) .. " m (" .. class .. ")  |  flooded " .. tostring(tiles) .. " tiles"
+	local class = (Tool and Tool.GetCurrentDepthClass()) or "dry"
+	local tiles = seg.flooded_tile_count or 0
+	local text = class .. "  |  flooded " .. tostring(tiles) .. " tiles"
 	pcall(function() label:SetText(text) end)
 end
 
@@ -381,7 +385,7 @@ function UI.Show()
 	-- is doing over time (e.g. drains back down when flow < losses).
 	local height_edit = make_param_row({
 		id = "RiversHeightRow",
-		label = "height:",
+		label = "height (lvl):",
 		max_value = (Rivers.Config and Rivers.Config.HYDRO_LEVEL_MAX_M) or 50,
 		step = (Rivers.Config and Rivers.Config.HYDRO_LEVEL_STEP_M) or 0.5,
 		hint = "m",
@@ -394,10 +398,10 @@ function UI.Show()
 		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, height input field omitted")
 	end
 
-	-- Flow row: discharge in m^3/s. -/+ adjusts the source's inflow rate.
+	-- Inflow row: source discharge in m^3/s. -/+ adjusts how much water enters.
 	local flow_edit = make_param_row({
-		id = "RiversFlowRow",
-		label = "flow:",
+		id = "RiversInflowRow",
+		label = "inflow:",
 		max_value = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_MAX_M3S) or 100,
 		step = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_STEP_M3S) or 0.5,
 		hint = "m^3/s",
@@ -407,7 +411,24 @@ function UI.Show()
 	if flow_edit then
 		Rivers.State.ui_flow_edit = flow_edit
 	else
-		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, flow input field omitted")
+		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, inflow input field omitted")
+	end
+
+	-- Outflow row: drain in m^3/s. -/+ adjusts how much water leaves; level
+	-- rises when inflow > outflow + passive losses, recedes otherwise.
+	local outflow_edit = make_param_row({
+		id = "RiversOutflowRow",
+		label = "outflow:",
+		max_value = (Rivers.Config and Rivers.Config.HYDRO_OUTFLOW_MAX_M3S) or 100,
+		step = (Rivers.Config and Rivers.Config.HYDRO_OUTFLOW_STEP_M3S) or 0.5,
+		hint = "m^3/s",
+	}, function(delta)
+		Rivers.Tool.AdjustOutflow(delta)
+	end)
+	if outflow_edit then
+		Rivers.State.ui_outflow_edit = outflow_edit
+	else
+		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, outflow input field omitted")
 	end
 
 	-- Apply + Clear All row: Apply reads the flow_edit value and pushes it to
@@ -424,6 +445,13 @@ function UI.Show()
 
 	make_button(action_row, "Apply", function()
 		if not Rivers.Tool then return end
+		local height_input = Rivers.State.ui_height_edit
+		if height_input and is_window_alive(height_input) then
+			local v = height_input:GetNumber()
+			if type(v) == "number" and type(Rivers.Tool.SetLevel) == "function" then
+				Rivers.Tool.SetLevel(v)
+			end
+		end
 		local flow_input = Rivers.State.ui_flow_edit
 		if flow_input and is_window_alive(flow_input) then
 			local v = flow_input:GetNumber()
@@ -431,11 +459,11 @@ function UI.Show()
 				Rivers.Tool.SetDischarge(v)
 			end
 		end
-		local height_input = Rivers.State.ui_height_edit
-		if height_input and is_window_alive(height_input) then
-			local v = height_input:GetNumber()
-			if type(v) == "number" and type(Rivers.Tool.SetLevel) == "function" then
-				Rivers.Tool.SetLevel(v)
+		local outflow_input = Rivers.State.ui_outflow_edit
+		if outflow_input and is_window_alive(outflow_input) then
+			local v = outflow_input:GetNumber()
+			if type(v) == "number" and type(Rivers.Tool.SetOutflow) == "function" then
+				Rivers.Tool.SetOutflow(v)
 			end
 		end
 		UI.Refresh()

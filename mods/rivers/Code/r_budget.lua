@@ -125,11 +125,35 @@ function Budget.AdjustDischarge(seg_id, delta_m3s)
 	return Budget.SetDischarge(seg_id, prev + (tonumber(delta_m3s) or 0))
 end
 
+function Budget.SetOutflow(seg_id, value_m3s)
+	local seg = Rivers.State.segments[seg_id]
+	if not seg then
+		return nil, "no such segment: " .. tostring(seg_id)
+	end
+	local v = tonumber(value_m3s) or 0
+	if v < 0 then v = 0 end
+	seg.outflow_m3s = v
+	if config().DEBUG_BUDGET == true then
+		DebugLog.Info(SCOPE, "set outflow", { id = seg_id, value = v })
+	end
+	return v
+end
+
+function Budget.AdjustOutflow(seg_id, delta_m3s)
+	local seg = Rivers.State.segments[seg_id]
+	if not seg then
+		return nil, "no such segment: " .. tostring(seg_id)
+	end
+	local prev = seg.outflow_m3s or 0
+	return Budget.SetOutflow(seg_id, prev + (tonumber(delta_m3s) or 0))
+end
+
 function Budget.Get(seg_id)
 	local seg = Rivers.State.segments[seg_id]
 	if not seg then return nil end
 	return {
 		discharge_m3s = seg.discharge_m3s or 0,
+		outflow_m3s = seg.outflow_m3s or 0,
 		volume_m3 = seg.volume_m3 or 0,
 		actual_level_m = seg.actual_level_m or 0,
 		flooded_tile_count = seg.flooded_tile_count or 0,
@@ -202,7 +226,6 @@ local function tick_segment(map, seg, dt_s, cfg)
 
 	local volume = seg.volume_m3 or 0
 	local discharge = seg.discharge_m3s or 0
-	local spill_m = seg.spill_level_m or 0
 	local bowl_area_wu2 = seg.bowl_area_wu2 or 0
 	-- Convert wu^2 areas to m^2 once. guim is wu/m, so wu^2 -> m^2 divides by guim^2.
 	local bowl_area_m2 = bowl_area_wu2 / (guim * guim)
@@ -212,26 +235,22 @@ local function tick_segment(map, seg, dt_s, cfg)
 
 	local evap_rate = cfg.HYDRO_EVAPORATION_M_PER_SEC or 0
 	local infil_rate = cfg.HYDRO_INFILTRATION_M_PER_SEC or 0
-	local outlet_cap = cfg.HYDRO_OUTLET_CAPACITY_M3S or 0
-	local overflow_factor = cfg.HYDRO_OVERFLOW_FACTOR or 1
+	local outflow = seg.outflow_m3s or 0
 
 	-- Inflow.
 	local inflow_m3 = discharge * dt_s
 
-	-- Losses. Evaporation acts on the visible water surface; infiltration acts
-	-- on whatever area is wet (including the bowl interior, approximated by
-	-- bowl_area when no spill has been computed yet).
+	-- Losses. Outflow is the player-controlled drain and always applies (it's
+	-- water leaving the system regardless of level). Evaporation acts on the
+	-- visible water surface; infiltration on whatever area is wet (approximated
+	-- by bowl_area when no spill has been computed yet).
 	local effective_surface_m2 = surface_area_m2 > 0 and surface_area_m2 or bowl_area_m2
 	local effective_flooded_m2 = flooded_area_m2 > 0 and flooded_area_m2 or bowl_area_m2
+	local outflow_m3 = outflow * dt_s
 	local evap_loss_m3 = evap_rate * effective_surface_m2 * dt_s
 	local infil_loss_m3 = infil_rate * effective_flooded_m2 * dt_s
-	-- Outlet only drains while we're above the rim.
-	local outlet_loss_m3 = 0
-	if (seg.actual_level_m or 0) > spill_m then
-		outlet_loss_m3 = outlet_cap * overflow_factor * dt_s
-	end
 
-	local new_volume = volume + inflow_m3 - evap_loss_m3 - infil_loss_m3 - outlet_loss_m3
+	local new_volume = volume + inflow_m3 - outflow_m3 - evap_loss_m3 - infil_loss_m3
 	if new_volume < 0 then new_volume = 0 end
 
 	local new_level_m = level_from_volume(seg, new_volume, bowl_area_m2, surface_area_m2)
@@ -255,9 +274,9 @@ local function tick_segment(map, seg, dt_s, cfg)
 
 	if cfg.DEBUG_BUDGET == true then
 		DebugLog.Info(SCOPE, "tick", {
-			discharge_m3s = discharge,
 			inflow_m3 = inflow_m3,
-			loss_m3 = evap_loss_m3 + infil_loss_m3 + outlet_loss_m3,
+			outflow_m3 = outflow_m3,
+			loss_m3 = evap_loss_m3 + infil_loss_m3,
 			volume_m3 = new_volume,
 			level_m = new_level_m,
 			flooded_tiles = seg.flooded_tile_count or 0,

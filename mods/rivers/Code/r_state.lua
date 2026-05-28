@@ -31,6 +31,7 @@
 --
 --     -- water budget (driven by r_budget.lua)
 --     discharge_m3s     = number,              -- player-controlled inflow
+--     outflow_m3s       = number,              -- player-controlled drain (always applied)
 --     volume_m3         = number,              -- accumulating water held in basin + spill
 --     actual_level_m    = number,              -- meters above floor; what the marker reflects
 --
