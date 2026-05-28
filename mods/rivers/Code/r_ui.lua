@@ -7,8 +7,8 @@
 --   │  [ Activate Water Mode ]   │   <- toggle (changes label when active)
 --   │  flow N m^3/s | lvl N m... │   <- current source: discharge, level, class, flooded tiles
 --   │  [ - ]            [ + ]    │   <- discharge -/+ (hold to repeat; step = HYDRO_DISCHARGE_STEP_M3S)
---   │  flow:  [_______]          │   <- type m^3/s, Enter to apply (XNumberEdit)
---   │  [ Clear All Water ]       │
+--   │  flow:  [_______]          │   <- type m^3/s (XNumberEdit, passive)
+--   │  [ Apply ] [ Clear All ]   │   <- Apply commits the typed value to discharge
 --   │                            │
 --   │           RAIN             │   <- section label
 --   │  Rain: none                │   <- status (disaster preset / visual on)
@@ -183,15 +183,14 @@ local function make_button(parent, label, on_press, opts)
 	return btn
 end
 
--- Attach a single-line XNumberEdit to `parent`. on_enter(number) fires when
--- the user finishes typing and presses Enter. Returns the edit handle (or nil
--- if XNumberEdit is unavailable for any reason -- the caller can decide whether
--- that is fatal).
-local function make_number_edit(parent, opts, on_enter)
+-- Attach a single-line XNumberEdit to `parent`. The edit is passive: it only
+-- holds the typed value until a caller (the Apply button below) reads it via
+-- `:GetNumber()`. Returns the edit handle, or nil if XNumberEdit is unavailable.
+local function make_number_edit(parent, opts)
 	opts = opts or {}
 	local x_number = rawget(_G, "XNumberEdit")
 	if not x_number then return nil end
-	local edit = x_number:new({
+	return x_number:new({
 		Translate = false,
 		TextStyle = "ConsoleLog",
 		HAlign = opts.halign or "stretch",
@@ -207,27 +206,6 @@ local function make_number_edit(parent, opts, on_enter)
 		MaxValue = opts.max_value or 1000,
 		Hint = opts.hint,
 	}, parent)
-	-- Enter on a single-line XEdit is in the vkPass list (see XTextEditor.lua:90)
-	-- so OnKbdKeyDown receives it without the base class swallowing it first.
-	-- We intercept Enter, read the parsed number, call on_enter, and consume the
-	-- key so it doesn't bleed into game shortcuts.
-	local const_table = rawget(_G, "const") or {}
-	local enter_vk = const_table.vkEnter
-	edit.OnKbdKeyDown = function(self, virtual_key, repeated)
-		if virtual_key == enter_vk and not repeated then
-			local n = self:GetNumber()
-			if type(n) == "number" then
-				pcall(on_enter, n)
-				if type(self.SetFocus) == "function" then
-					pcall(function() self:SetFocus(false) end)
-				end
-				return "break"
-			end
-		end
-		-- Defer to the base XTextEditor handler for everything else.
-		return x_number.OnKbdKeyDown(self, virtual_key, repeated)
-	end
-	return edit
 end
 
 -- ----------------------------------------------------------------------------
@@ -364,25 +342,49 @@ function UI.Show()
 		max_width = 180,
 		min_value = 0,
 		max_value = max_flow,
-		hint = "m^3/s, Enter to apply",
-	}, function(value)
-		if not Rivers.Tool then return end
-		Rivers.Tool.SetDischarge(value)
-		UI.Refresh()
-	end)
+		hint = "m^3/s",
+	})
 	if flow_edit then
 		Rivers.State.ui_flow_edit = flow_edit
 	else
 		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, flow input field omitted")
 	end
 
-	-- Clear All
-	make_button(panel, "Clear All Water", function()
+	-- Apply + Clear All row: Apply reads the flow_edit value and pushes it to
+	-- the current source's discharge (no Enter shortcut anymore -- only this
+	-- button commits a typed value).
+	local action_row = x_window:new({
+		Id = "RiversActionRow",
+		LayoutMethod = "HList",
+		LayoutHSpacing = 8,
+		HAlign = "stretch",
+		MinWidth = 220,
+		MaxWidth = 260,
+	}, panel)
+
+	make_button(action_row, "Apply", function()
+		local edit = Rivers.State.ui_flow_edit
+		if not edit or not is_window_alive(edit) then
+			DebugLog.Warn(SCOPE, "Apply: flow input unavailable")
+			return
+		end
+		local value = edit:GetNumber()
+		if type(value) ~= "number" then
+			DebugLog.Warn(SCOPE, "Apply: invalid number in flow input")
+			return
+		end
+		if Rivers.Tool and type(Rivers.Tool.SetDischarge) == "function" then
+			Rivers.Tool.SetDischarge(value)
+		end
+		UI.Refresh()
+	end, { halign = "stretch", min_width = 100, max_width = 120 })
+
+	make_button(action_row, "Clear All Water", function()
 		if type(Rivers.ClearAll) == "function" then
 			Rivers.ClearAll()
 		end
 		UI.Refresh()
-	end)
+	end, { halign = "stretch", min_width = 100, max_width = 140 })
 
 	-- Rain section
 	x_label:new({
