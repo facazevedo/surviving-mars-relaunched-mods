@@ -18,6 +18,9 @@
 --   Rivers.State.ui_rain_label    -- panel rain label     (r_ui.lua)
 --   Rivers.State.rain_visual_on   -- visual rain override active (r_rain.lua)
 --   Rivers.State.budget_thread    -- game-time ticker handle (r_budget.lua)
+--   Rivers.State.rebuild_queue    -- FIFO of segment ids awaiting a heavy water-grid
+--                                 --   rebuild; drained up to HYDRO_MAX_REBUILDS_PER_TICK
+--                                 --   per tick (r_budget.lua)
 --
 -- A segment record (post-Phase-1 shape):
 --   {
@@ -38,6 +41,8 @@
 --                                              --   budget tick skips the flood-fill + grid
 --                                              --   rebuild until the level drifts at least
 --                                              --   HYDRO_APPLY_STEP_M from this (perf gate)
+--     rebuild_queued    = bool,                -- true while this segment sits in the
+--                                              --   rebuild_queue (prevents double-enqueue)
 --
 --     -- flood-fill cache (set by r_flood.lua each tick)
 --     flooded_tile_count = int,

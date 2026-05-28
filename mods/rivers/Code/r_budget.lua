@@ -220,9 +220,30 @@ end
 -- Tick
 -- ----------------------------------------------------------------------------
 
--- Advance one segment by dt_s seconds. Updates volume, actual_level_m, and
--- pushes the new level to the engine water marker via Rivers.Water.SetMarkerLevel.
-local function tick_segment(map, seg, dt_s, cfg)
+-- Is the segment's level far enough from what we last pushed to the engine to
+-- justify a heavy rebuild? True on the first tick (no baseline) and when the
+-- pool has just fully drained, so the water visibly appears/disappears.
+local function segment_is_due(seg, cfg)
+	local last = seg.applied_level_m
+	if last == nil then
+		return true
+	end
+	local lvl = seg.actual_level_m or 0
+	if lvl <= 0 and last > 0 then
+		return true
+	end
+	local apply_step = cfg.HYDRO_APPLY_STEP_M or 1.0
+	local drift = lvl - last
+	if drift < 0 then drift = -drift end
+	return drift >= apply_step
+end
+
+-- CHEAP per-tick integration. Runs for EVERY segment every tick so the water
+-- budget stays physically correct regardless of how the heavy rebuilds are
+-- throttled. Updates volume + actual_level_m only; does no flood-fill and
+-- touches no engine state. Returns true if the segment is now "due" for a
+-- (heavy) visual rebuild.
+local function update_segment_volume(seg, dt_s, cfg)
 	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
 		return false
 	end
@@ -262,36 +283,6 @@ local function tick_segment(map, seg, dt_s, cfg)
 	seg.volume_m3 = new_volume
 	seg.actual_level_m = new_level_m
 
-	-- PERFORMANCE GATE. The flood-fill (a BFS over up to FLOOD_MAX_TILES tiles,
-	-- one terrain.GetHeight each) and the engine water-grid rebuild
-	-- (SetMarkerLevel -> UpdateGridAndVisuals + ApplyAllWaterObjects) are by far
-	-- the most expensive things this tick does. Running them every second is
-	-- what caused the in-game lag. We only do the heavy work once the level has
-	-- drifted at least HYDRO_APPLY_STEP_M meters since we last applied it, so a
-	-- filling/draining pool updates in discrete steps (default 1 m) rather than
-	-- every tick. The displayed field still updates smoothly (it reads
-	-- actual_level_m); only the visual water + flood recompute are stepped.
-	local apply_step = cfg.HYDRO_APPLY_STEP_M or 1.0
-	local last_applied = seg.applied_level_m
-	local drift = last_applied and (new_level_m - last_applied) or nil
-	if drift and drift < 0 then drift = -drift end
-	-- Always apply on the first tick (no baseline yet) and when the pool fully
-	-- drains to 0 (so the water visually disappears even on a sub-step change).
-	local must_apply = (last_applied == nil)
-		or (drift and drift >= apply_step)
-		or (new_level_m <= 0 and (last_applied or 0) > 0)
-	if must_apply then
-		seg.applied_level_m = new_level_m
-		if Rivers.Flood and type(Rivers.Flood.RecomputeSegment) == "function" then
-			Rivers.Flood.RecomputeSegment(map, seg)
-		end
-		local Water = Rivers.Water
-		if Water and type(Water.SetMarkerLevel) == "function" then
-			local new_water_z = (seg.floor_wu or 0) + meters_to_wu(new_level_m)
-			Water.SetMarkerLevel(map, seg.water_obj, new_water_z)
-		end
-	end
-
 	if cfg.DEBUG_BUDGET == true then
 		DebugLog.Info(SCOPE, "tick", {
 			inflow_m3 = inflow_m3,
@@ -302,16 +293,75 @@ local function tick_segment(map, seg, dt_s, cfg)
 			flooded_tiles = seg.flooded_tile_count or 0,
 		})
 	end
-	return true
+
+	return segment_is_due(seg, cfg)
+end
+
+-- HEAVY visual rebuild. The flood-fill (a BFS over up to FLOOD_MAX_TILES tiles,
+-- one terrain.GetHeight each) and the engine water-grid rebuild (SetMarkerLevel
+-- -> UpdateGridAndVisuals + ApplyAllWaterObjects) are the costly part, so this
+-- is rate-limited two ways: per segment by segment_is_due (the per-meter gate),
+-- and globally by the per-tick cap in Budget.Tick. Snaps applied_level_m to the
+-- current level so the gate measures the next drift from here.
+local function apply_segment(map, seg)
+	seg.applied_level_m = seg.actual_level_m or 0
+	if Rivers.Flood and type(Rivers.Flood.RecomputeSegment) == "function" then
+		Rivers.Flood.RecomputeSegment(map, seg)
+	end
+	local Water = Rivers.Water
+	if Water and type(Water.SetMarkerLevel) == "function" then
+		local new_water_z = (seg.floor_wu or 0) + meters_to_wu(seg.actual_level_m or 0)
+		Water.SetMarkerLevel(map, seg.water_obj, new_water_z)
+	end
 end
 
 -- Public tick: step every segment once by dt_s seconds.
+--
+-- Two phases:
+--   1. Integrate every segment's volume/level (cheap arithmetic). Any segment
+--      that becomes "due" for a visual rebuild is enqueued once.
+--   2. Process at most HYDRO_MAX_REBUILDS_PER_TICK due segments from the front
+--      of the queue (FIFO round-robin). The overflow stays queued and is picked
+--      up on following ticks, so frame cost is hard-bounded no matter how many
+--      lakes are active. Deferred lakes keep integrating in phase 1 -- only
+--      their visual refresh waits its turn.
 function Budget.Tick(map, dt_s)
 	if not map then return end
 	local cfg = config()
-	for _id, seg in pairs(Rivers.State.segments) do
-		tick_segment(map, seg, dt_s, cfg)
+
+	local queue = Rivers.State.rebuild_queue
+	if type(queue) ~= "table" then
+		queue = {}
+		Rivers.State.rebuild_queue = queue
 	end
+
+	-- Phase 1: cheap integration + enqueue newly-due segments (no duplicates).
+	for id, seg in pairs(Rivers.State.segments) do
+		if update_segment_volume(seg, dt_s, cfg) and not seg.rebuild_queued then
+			seg.rebuild_queued = true
+			queue[#queue + 1] = id
+		end
+	end
+
+	-- Phase 2: spend the per-tick rebuild budget on the oldest due segments.
+	local cap = cfg.HYDRO_MAX_REBUILDS_PER_TICK or 3
+	if cap < 1 then cap = 1 end
+	local processed = 0
+	while processed < cap and #queue > 0 do
+		local id = table.remove(queue, 1)
+		local seg = Rivers.State.segments[id]
+		if seg then
+			seg.rebuild_queued = false
+			-- Re-check: the segment may have been levelled (instant SetLevel) or
+			-- drifted back since it was queued. Only spend budget if still due.
+			if seg.water_obj and IsValid(seg.water_obj) and segment_is_due(seg, cfg) then
+				apply_segment(map, seg)
+				processed = processed + 1
+			end
+		end
+		-- A stale/invalid/no-longer-due id is simply dropped without cost.
+	end
+
 	-- The status label + the live input fields need a Refresh to reflect the
 	-- new volume/level/discharge values. Refresh is cheap and gated on
 	-- is_window_alive, so calling it every tick is safe even with no panel.
@@ -358,6 +408,9 @@ end
 
 function Budget.StopTicker()
 	local thread = Rivers.State.budget_thread
+	-- Drop the rebuild queue so ids from this map/session don't linger into the
+	-- next one (they'd be skipped as stale, but clearing keeps it tidy).
+	Rivers.State.rebuild_queue = {}
 	if not thread then return end
 	if type(rawget(_G, "DeleteThread")) == "function" and IsValidThread(thread) then
 		DeleteThread(thread)
