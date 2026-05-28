@@ -1,6 +1,6 @@
-# Rivers -- Implementation Phases
+# Rivers -- Roadmap
 
-This file is the long-form roadmap that `README.md` summarises. Each phase is a single mergeable unit; the file is updated as phases land so it stays a forward-looking ledger.
+Long-form phase plan that `README.md` summarises. Each phase is a single mergeable unit; the file is updated as phases land so it stays a forward-looking ledger.
 
 ---
 
