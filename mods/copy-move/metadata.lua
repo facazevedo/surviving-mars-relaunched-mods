@@ -1,0 +1,22 @@
+return PlaceObj('ModDef', {
+	'title', "Copy Move",
+	'description', "Select any object (buildings, decorations, rocks, domes, animals) and tint it green; hold Ctrl to multi-select. Copy/paste selections and drag-move placed buildings and whole domes. A sandbox companion to Force Delete.",
+	'short_description', "Select, copy, paste and move objects.",
+	'id', "CopyMove",
+	'author', "fredware",
+	'version', 1,
+	'lua_revision', 350453,
+	'saved_with_revision', 380799,
+	'code', {
+		"Code/cm_version.lua",
+		"Code/cm_config.lua",
+		"Code/cm_debug.lua",
+		"Code/cm_object.lua",
+		"Code/cm_classify.lua",
+		"Code/cm_selection.lua",
+		"Code/cm_input.lua",
+		"Code/CopyMove.lua",
+	},
+	'saved', 1780000000,
+	'TagGameplay', true,
+})
