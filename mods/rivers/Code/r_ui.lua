@@ -5,10 +5,10 @@
 --   │           RIVERS           │   <- title
 --   ├────────────────────────────┤
 --   │  [ Activate Water Mode ]   │   <- toggle (changes label when active)
---   │  flow N m^3/s | lvl N m... │   <- current source: discharge, level, class, flooded tiles
---   │  [ - ]            [ + ]    │   <- discharge -/+ (hold to repeat; step = HYDRO_DISCHARGE_STEP_M3S)
---   │  flow:  [_______]          │   <- type m^3/s (XNumberEdit, passive)
---   │  [ Apply ] [ Clear All ]   │   <- Apply commits the typed value to discharge
+--   │  flow N m^3/s | lvl N m... │   <- status: discharge, level, class, flooded tiles
+--   │  flow:   [____]  [-] [+]   │   <- discharge in m^3/s; -/+ hold-to-repeat
+--   │  height: [____]  [-] [+]   │   <- instant water level in m; -/+ hold-to-repeat
+--   │  [ Apply ] [ Clear All ]   │   <- Apply commits both typed values to the current source
 --   │                            │
 --   │           RAIN             │   <- section label
 --   │  Rain: none                │   <- status (disaster preset / visual on)
@@ -82,6 +82,7 @@ local function destroy_panel()
 	Rivers.State.ui_level_label = false
 	Rivers.State.ui_rain_label = false
 	Rivers.State.ui_flow_edit = false
+	Rivers.State.ui_height_edit = false
 end
 
 local function update_toggle_visual()
@@ -278,76 +279,97 @@ function UI.Show()
 	}, panel)
 	Rivers.State.ui_level_label = level_label
 
-	-- +/- row
-	local minus_plus_row = x_window:new({
-		Id = "RiversLevelRow",
-		LayoutMethod = "HList",
-		LayoutHSpacing = 8,
-		HAlign = "stretch",
-		MinWidth = 220,
-		MaxWidth = 260,
-	}, panel)
-
+	-- One row per source-parameter: [ label  input  -  + ]. The -/+ buttons
+	-- commit immediately via on_adjust(delta). The input is passive: it just
+	-- holds whatever the player has typed until the Apply button reads it.
 	local repeat_start = (Rivers.Config and Rivers.Config.HYDRO_BUTTON_REPEAT_START_MS) or 300
 	local repeat_interval = (Rivers.Config and Rivers.Config.HYDRO_BUTTON_REPEAT_INTERVAL_MS) or 150
 
-	make_button(minus_plus_row, "  -  ", function()
-		if not Rivers.Tool then return end
-		local step = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_STEP_M3S) or 0.5
-		Rivers.Tool.AdjustDischarge(-step)
-		UI.Refresh()
-	end, {
-		halign = "stretch", min_width = 100, max_width = 120,
-		repeat_start = repeat_start, repeat_interval = repeat_interval,
-	})
+	local function make_param_row(opts, on_adjust)
+		local row = x_window:new({
+			Id = opts.id,
+			LayoutMethod = "HList",
+			LayoutHSpacing = 4,
+			HAlign = "stretch",
+			MinWidth = 220,
+			MaxWidth = 260,
+		}, panel)
 
-	make_button(minus_plus_row, "  +  ", function()
-		if not Rivers.Tool then return end
-		local step = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_STEP_M3S) or 0.5
-		Rivers.Tool.AdjustDischarge(step)
-		UI.Refresh()
-	end, {
-		halign = "stretch", min_width = 100, max_width = 120,
-		repeat_start = repeat_start, repeat_interval = repeat_interval,
-	})
+		x_label:new({
+			Text = opts.label,
+			Translate = false,
+			TextStyle = "ConsoleLog",
+			TextColor = TEXT_COLOR,
+			HAlign = "left",
+			VAlign = "center",
+			MinWidth = 56,
+			MaxWidth = 56,
+			MinHeight = ROW_HEIGHT,
+			MaxHeight = ROW_HEIGHT,
+		}, row)
 
-	-- Flow input row: "flow:" label + numeric edit. Pressing Enter while focus
-	-- is in the edit sets the source discharge to the typed value.
-	local flow_row = x_window:new({
-		Id = "RiversFlowInputRow",
-		LayoutMethod = "HList",
-		LayoutHSpacing = 8,
-		HAlign = "stretch",
-		MinWidth = 220,
-		MaxWidth = 260,
-	}, panel)
+		local edit = make_number_edit(row, {
+			halign = "stretch",
+			min_width = 80,
+			max_width = 110,
+			min_value = 0,
+			max_value = opts.max_value,
+			hint = opts.hint,
+		})
 
-	x_label:new({
-		Text = "flow:",
-		Translate = false,
-		TextStyle = "ConsoleLog",
-		TextColor = TEXT_COLOR,
-		HAlign = "left",
-		VAlign = "center",
-		MinWidth = 60,
-		MaxWidth = 60,
-		MinHeight = ROW_HEIGHT,
-		MaxHeight = ROW_HEIGHT,
-	}, flow_row)
+		make_button(row, "-", function()
+			if not Rivers.Tool then return end
+			on_adjust(-(opts.step or 1))
+			UI.Refresh()
+		end, {
+			halign = "stretch", min_width = 32, max_width = 40,
+			repeat_start = repeat_start, repeat_interval = repeat_interval,
+		})
 
-	local max_flow = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_MAX_M3S) or 100
-	local flow_edit = make_number_edit(flow_row, {
-		halign = "stretch",
-		min_width = 140,
-		max_width = 180,
-		min_value = 0,
-		max_value = max_flow,
+		make_button(row, "+", function()
+			if not Rivers.Tool then return end
+			on_adjust(opts.step or 1)
+			UI.Refresh()
+		end, {
+			halign = "stretch", min_width = 32, max_width = 40,
+			repeat_start = repeat_start, repeat_interval = repeat_interval,
+		})
+
+		return edit
+	end
+
+	-- Flow row: discharge in m^3/s. -/+ adjusts the source's inflow rate.
+	local flow_edit = make_param_row({
+		id = "RiversFlowRow",
+		label = "flow:",
+		max_value = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_MAX_M3S) or 100,
+		step = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_STEP_M3S) or 0.5,
 		hint = "m^3/s",
-	})
+	}, function(delta)
+		Rivers.Tool.AdjustDischarge(delta)
+	end)
 	if flow_edit then
 		Rivers.State.ui_flow_edit = flow_edit
 	else
 		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, flow input field omitted")
+	end
+
+	-- Height row: instant water level in meters above the bowl floor. -/+
+	-- snaps the level immediately via Budget.SetLevel (volume inverted from
+	-- the new level), bypassing the rate-limited budget chase.
+	local height_edit = make_param_row({
+		id = "RiversHeightRow",
+		label = "height:",
+		max_value = (Rivers.Config and Rivers.Config.HYDRO_LEVEL_MAX_M) or 50,
+		step = (Rivers.Config and Rivers.Config.HYDRO_LEVEL_STEP_M) or 0.5,
+		hint = "m",
+	}, function(delta)
+		Rivers.Tool.AdjustLevel(delta)
+	end)
+	if height_edit then
+		Rivers.State.ui_height_edit = height_edit
+	else
+		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, height input field omitted")
 	end
 
 	-- Apply + Clear All row: Apply reads the flow_edit value and pushes it to
@@ -363,18 +385,20 @@ function UI.Show()
 	}, panel)
 
 	make_button(action_row, "Apply", function()
-		local edit = Rivers.State.ui_flow_edit
-		if not edit or not is_window_alive(edit) then
-			DebugLog.Warn(SCOPE, "Apply: flow input unavailable")
-			return
+		if not Rivers.Tool then return end
+		local flow_input = Rivers.State.ui_flow_edit
+		if flow_input and is_window_alive(flow_input) then
+			local v = flow_input:GetNumber()
+			if type(v) == "number" and type(Rivers.Tool.SetDischarge) == "function" then
+				Rivers.Tool.SetDischarge(v)
+			end
 		end
-		local value = edit:GetNumber()
-		if type(value) ~= "number" then
-			DebugLog.Warn(SCOPE, "Apply: invalid number in flow input")
-			return
-		end
-		if Rivers.Tool and type(Rivers.Tool.SetDischarge) == "function" then
-			Rivers.Tool.SetDischarge(value)
+		local height_input = Rivers.State.ui_height_edit
+		if height_input and is_window_alive(height_input) then
+			local v = height_input:GetNumber()
+			if type(v) == "number" and type(Rivers.Tool.SetLevel) == "function" then
+				Rivers.Tool.SetLevel(v)
+			end
 		end
 		UI.Refresh()
 	end, { halign = "stretch", min_width = 100, max_width = 120 })

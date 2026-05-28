@@ -226,8 +226,8 @@ function Tool.AdjustDischarge(delta_m3s)
 	return Rivers.Budget.AdjustDischarge(seg_id, delta_m3s or 0)
 end
 
--- Used by the UI flow input field when the player types a number and hits
--- Enter. value_m3s is clamped to >= 0 by Budget.SetDischarge.
+-- Used by the UI Apply button to push the flow input value through to the
+-- current source. value_m3s is clamped to >= 0 by Budget.SetDischarge.
 function Tool.SetDischarge(value_m3s)
 	local seg_id = Rivers.State.current_marker_segment
 	if not seg_id then
@@ -242,6 +242,42 @@ function Tool.SetDischarge(value_m3s)
 		return nil, "Rivers.Budget module not loaded"
 	end
 	return Rivers.Budget.SetDischarge(seg_id, value_m3s or 0)
+end
+
+-- The height-row +/- buttons and the Apply button both flow through here.
+-- This is an INSTANT level snap (Budget.SetLevel inverts volume-from-level
+-- and pushes the engine marker immediately); the regular budget tick then
+-- continues from the new volume.
+function Tool.SetLevel(level_m)
+	local seg_id = Rivers.State.current_marker_segment
+	if not seg_id then
+		return nil, "no current marker (click a hole first)"
+	end
+	local seg = Rivers.State.segments[seg_id]
+	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
+		clear_current()
+		return nil, "current marker is gone"
+	end
+	if not Rivers.Budget or type(Rivers.Budget.SetLevel) ~= "function" then
+		return nil, "Rivers.Budget module not loaded"
+	end
+	return Rivers.Budget.SetLevel(seg_id, level_m or 0)
+end
+
+function Tool.AdjustLevel(delta_m)
+	local seg_id = Rivers.State.current_marker_segment
+	if not seg_id then
+		return nil, "no current marker (click a hole first)"
+	end
+	local seg = Rivers.State.segments[seg_id]
+	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
+		clear_current()
+		return nil, "current marker is gone"
+	end
+	if not Rivers.Budget or type(Rivers.Budget.AdjustLevel) ~= "function" then
+		return nil, "Rivers.Budget module not loaded"
+	end
+	return Rivers.Budget.AdjustLevel(seg_id, delta_m or 0)
 end
 
 -- ----------------------------------------------------------------------------

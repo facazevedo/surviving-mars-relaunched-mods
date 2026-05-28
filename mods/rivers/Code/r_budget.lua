@@ -89,6 +89,58 @@ function Budget.Get(seg_id)
 end
 
 -- ----------------------------------------------------------------------------
+-- Level controls (the "height" input field on the UI)
+-- ----------------------------------------------------------------------------
+
+-- Snap the water level to `level_m` immediately, bypassing the rate-limited
+-- chase the budget normally drives. We do this by inverting the volume-to-level
+-- function: pick the volume that would produce that level, then let the next
+-- regular tick continue from there. Pushes the new level to the engine marker
+-- and re-runs the flood-fill so the visual snaps in the same frame.
+function Budget.SetLevel(seg_id, level_m)
+	local seg = Rivers.State.segments[seg_id]
+	if not seg then
+		return nil, "no such segment: " .. tostring(seg_id)
+	end
+	local v = tonumber(level_m) or 0
+	if v < 0 then v = 0 end
+
+	local bowl_area_m2 = (seg.bowl_area_wu2 or 0) / (guim * guim)
+	local surface_area_m2 = (seg.surface_area_wu2 or 0) / (guim * guim)
+	local new_volume = volume_from_level(seg, v, bowl_area_m2, surface_area_m2)
+	seg.volume_m3 = new_volume
+	seg.actual_level_m = v
+
+	local map = current_map()
+	if Rivers.Flood and type(Rivers.Flood.RecomputeSegment) == "function" then
+		Rivers.Flood.RecomputeSegment(map, seg)
+	end
+	local Water = Rivers.Water
+	if Water and type(Water.SetMarkerLevel) == "function" and seg.water_obj then
+		local new_water_z = (seg.floor_wu or 0) + meters_to_wu(v)
+		Water.SetMarkerLevel(map, seg.water_obj, new_water_z)
+	end
+
+	if config().DEBUG_BUDGET == true then
+		DebugLog.Info(SCOPE, "set level", {
+			id = seg_id,
+			level_m = v,
+			volume_m3 = new_volume,
+		})
+	end
+	return v
+end
+
+function Budget.AdjustLevel(seg_id, delta_m)
+	local seg = Rivers.State.segments[seg_id]
+	if not seg then
+		return nil, "no such segment: " .. tostring(seg_id)
+	end
+	local prev = seg.actual_level_m or 0
+	return Budget.SetLevel(seg_id, prev + (tonumber(delta_m) or 0))
+end
+
+-- ----------------------------------------------------------------------------
 -- Volume-to-level inversion
 -- ----------------------------------------------------------------------------
 
@@ -114,6 +166,25 @@ local function level_from_volume(seg, volume_m3, bowl_area_m2, surface_area_m2)
 	local area = surface_area_m2 > 0 and surface_area_m2 or bowl_area_m2
 	local overflow_m3 = volume_m3 - bowl_capacity_m3
 	return spill_m + overflow_m3 / area
+end
+
+-- Forward inverse of `level_from_volume`. Used by Budget.SetLevel so the player
+-- can ask for an instantaneous flood-to-height: we work backwards to the
+-- volume that would produce that level, then let the regular tick continue.
+local function volume_from_level(seg, level_m, bowl_area_m2, surface_area_m2)
+	if level_m <= 0 then
+		return 0
+	end
+	local spill_m = seg.spill_level_m or 0
+	if spill_m <= 0 then
+		return 0
+	end
+	if level_m <= spill_m then
+		return level_m * bowl_area_m2
+	end
+	local bowl_capacity_m3 = bowl_area_m2 * spill_m
+	local area = surface_area_m2 > 0 and surface_area_m2 or bowl_area_m2
+	return bowl_capacity_m3 + (level_m - spill_m) * area
 end
 
 -- ----------------------------------------------------------------------------
