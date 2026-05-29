@@ -55,41 +55,15 @@ local ACCENT = RGB(120, 210, 230)                -- cyan accent
 local TEXT_COLOR = RGB(232, 240, 245)            -- primary text
 local TEXT_MUTED = RGB(150, 172, 184)            -- status lines / readouts / hints
 
--- Register custom TextStyles cloned from the vanilla infopanel's fonts but one
--- point smaller (per request). TextStyle has GlobalMap = "TextStyles" and is an
--- official mod-item preset, so a PlaceObj at load registers into the global
--- TextStyles table that XControl resolves against. If registration ever fails,
--- we fall back to the stock infopanel style ids (which are 1pt larger).
-local function reg_style(id, font, size, color, fallback)
-	local presets = rawget(_G, "Presets")
-	if presets and presets.TextStyle and presets.TextStyle[id] then
-		return id
-	end
-	local place = rawget(_G, "PlaceObj")
-	if type(place) == "function" then
-		pcall(place, "TextStyle", {
-			id = id,
-			group = "MartianWaters",
-			FontName = font,
-			FontSize = size,
-			TextColor = color,
-			RolloverTextColor = color,
-			ShadowType = "shadow",
-			ShadowSize = 1,
-			save_in = "",
-		})
-	end
-	local styles = rawget(_G, "TextStyles")
-	if styles and styles[id] then
-		return id
-	end
-	return fallback
-end
-
-local TITLE_STYLE   = reg_style("MW_Title",   "LibelSuitRg-Regular", 25, RGBA(245, 252, 255, 255), "InfopanelTitleR")
-local SECTION_STYLE = reg_style("MW_Section", "LibelSuitRg-Regular", 19, RGBA(120, 210, 230, 255), "InfopanelTextBlueR")
-local READOUT_STYLE = reg_style("MW_Readout", "SchemeBk-Regular",    17, RGBA(232, 240, 245, 255), "InfopanelTextR")
-local TEXT_STYLE    = reg_style("MW_Body",    "Droid Sans",          12, RGBA(232, 240, 245, 255), "EditorText")
+-- Use the vanilla infopanel's own TextStyles directly. (Registering custom
+-- TextStyles at runtime crashes -- the font isn't put through the engine's
+-- load-time pipeline, so GetFontId rejects it -- so we can't apply a "-1pt"
+-- size this way; that would need a proper TextStyle Data preset shipped with
+-- the mod.)
+local TITLE_STYLE   = "InfopanelTitleR"     -- LibelSuit, 26
+local SECTION_STYLE = "InfopanelTextBlueR"  -- cyan, 20
+local READOUT_STYLE = "InfopanelTextR"      -- white, 18
+local TEXT_STYLE    = "EditorText"          -- Droid Sans, 13 (compact rows)
 
 local PANEL_BACKGROUND = RGBA(14, 22, 30, 232)   -- deep slate, mostly opaque for readability
 local HEADER_BACKGROUND = RGBA(22, 78, 99, 245)  -- teal title band
@@ -478,10 +452,25 @@ function UI.Show()
 		ChildrenHandleMouse = true,
 	}, parent)
 
-	-- Native infopanel frame: XFrame is the engine's 9-slice image-frame window
-	-- (the same class + texture the real infopanel uses). Docked "box" it fills
-	-- the panel behind all content (created first => lowest draw order). If XFrame
-	-- or the texture is unavailable the flat PANEL_BACKGROUND still shows.
+	-- Native infopanel body, reproduced exactly as InfopanelSection builds it:
+	--   1) a frosted XBlurRect that blurs the map behind the panel (the dark,
+	--      glassy look), masked to the ip_background frame shape;
+	--   2) the ip_background 9-slice XFrame drawn semi-transparent (Transparency
+	--      102, same as vanilla) ON TOP -- this is the subtle blue frame, NOT a
+	--      solid fill, so it tints rather than blocks.
+	-- Both are created before any content so they sit behind it. Each is guarded;
+	-- the flat PANEL_BACKGROUND remains as a fallback if a class/texture is absent.
+	local x_blur = rawget(_G, "XBlurRect")
+	if x_blur then
+		x_blur:new({
+			Id = "MartianWatersBlur",
+			Dock = "box",
+			BlurRadius = 18,
+			Mask = "UI/InfopanelRemaster/ip_background.png",
+			FrameLeft = 12, FrameTop = 12, FrameRight = 12, FrameBottom = 12,
+			HandleMouse = false,
+		}, panel)
+	end
 	local x_frame = rawget(_G, "XFrame")
 	if x_frame then
 		x_frame:new({
@@ -489,6 +478,7 @@ function UI.Show()
 			Dock = "box",
 			Image = "UI/InfopanelRemaster/ip_background.png",
 			FrameBox = box(12, 12, 12, 12),
+			Transparency = 102,
 			HandleMouse = false,
 		}, panel)
 	end
