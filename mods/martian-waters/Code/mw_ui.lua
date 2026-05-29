@@ -146,7 +146,7 @@ local function refresh_input_fields(seg)
 	for i = 1, #INPUT_FIELDS do
 		local edit = MartianWaters.State[INPUT_FIELDS[i].state_key]
 		if is_window_alive(edit) and edit ~= focused then
-			local text = seg and format_float(seg[INPUT_FIELDS[i].seg_field] or 0, 2) or ""
+			local text = seg and format_float(seg[INPUT_FIELDS[i].seg_field] or 0, 1) or ""
 			pcall(function() edit:SetText(text) end)
 		end
 	end
@@ -157,7 +157,7 @@ local function refresh_input_fields(seg)
 	if is_window_alive(sea_edit) and sea_edit ~= focused then
 		local Tool = MartianWaters.Tool
 		local lvl = Tool and Tool.GetSeaLevel and Tool.GetSeaLevel() or nil
-		local text = lvl and format_float(lvl, 2) or ""
+		local text = lvl and format_float(lvl, 1) or ""
 		pcall(function() sea_edit:SetText(text) end)
 	end
 end
