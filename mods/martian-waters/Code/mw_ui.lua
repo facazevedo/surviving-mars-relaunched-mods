@@ -43,18 +43,35 @@ local UI = {}
 
 local PANEL_ID = "MartianWatersWaterToolPanel"
 
--- Colors / sizing borrowed from scenario-editor's panel for visual consistency.
-local PANEL_BACKGROUND = RGBA(0, 0, 0, 190)
-local BUTTON_BACKGROUND = RGBA(30, 40, 45, 230)
-local BUTTON_ROLLOVER = RGBA(55, 70, 78, 240)
-local BUTTON_ACTIVE = RGBA(80, 130, 90, 240)
-local TEXT_COLOR = RGB(255, 255, 255)
--- Smaller font for a more compact panel. "GedConsole" is FontSize 10 (vs
--- "ConsoleLog" 13); every control overrides TextColor to white, so the style's
--- own colour doesn't matter.
-local TEXT_STYLE = "GedConsole"
-local ROW_HEIGHT = 20
-local ROW_SPACING = 3
+-- ----------------------------------------------------------------------------
+-- Theme: a modern, water-themed palette + a small typographic hierarchy built
+-- from existing engine TextStyles (no custom-font registration needed):
+--   TITLE_STYLE   "CommonMessageDescription" -- Source Sans Pro, 20
+--   SECTION_STYLE "ConsoleLog"               -- Droid Sans Bold, 13
+--   TEXT_STYLE    "EditorText"               -- Droid Sans, 13 (body/fields/buttons)
+-- Every control overrides TextColor explicitly, so the styles' built-in colours
+-- don't matter -- only their font + size do.
+-- ----------------------------------------------------------------------------
+local TITLE_STYLE = "CommonMessageDescription"
+local SECTION_STYLE = "ConsoleLog"
+local TEXT_STYLE = "EditorText"
+
+local PANEL_BACKGROUND = RGBA(14, 22, 30, 232)   -- deep slate, mostly opaque for readability
+local HEADER_BACKGROUND = RGBA(22, 78, 99, 245)  -- teal title band
+local SEPARATOR_COLOR = RGBA(255, 255, 255, 28)  -- hairline section divider
+local ACCENT = RGB(120, 210, 230)                -- cyan accent for section headers
+local TEXT_COLOR = RGB(232, 240, 245)            -- primary text
+local TEXT_MUTED = RGB(150, 172, 184)            -- status lines / readouts / hints
+
+local BUTTON_BACKGROUND = RGBA(32, 46, 56, 235)  -- secondary button
+local BUTTON_ROLLOVER = RGBA(48, 74, 90, 245)
+local BUTTON_ACTIVE = RGB(40, 130, 110)          -- water-mode ON toggle
+local BUTTON_PRIMARY = RGBA(26, 96, 120, 242)    -- accent action (Apply / Generate Sea)
+local BUTTON_PRIMARY_ROLLOVER = RGBA(34, 122, 150, 250)
+
+local ROW_HEIGHT = 26
+local ROW_SPACING = 4
+local TITLE_HEIGHT = 36
 
 local function is_window_alive(win)
 	if not win then return false end
@@ -62,6 +79,35 @@ local function is_window_alive(win)
 		return win.window_state ~= "destroying"
 	end
 	return true
+end
+
+-- Thin horizontal divider line stacked in the panel's VList.
+local function add_separator(parent)
+	local x_window = rawget(_G, "XWindow")
+	if not x_window then return end
+	x_window:new({
+		HAlign = "stretch",
+		MinHeight = 2,
+		MaxHeight = 2,
+		Margins = box(0, 4, 0, 2),
+		Background = SEPARATOR_COLOR,
+	}, parent)
+end
+
+-- A section header: a divider above + an accent-coloured bold caption.
+local function add_section(parent, text)
+	add_separator(parent)
+	local x_label = rawget(_G, "XLabel")
+	if not x_label then return end
+	x_label:new({
+		Text = text,
+		Translate = false,
+		TextStyle = SECTION_STYLE,
+		TextColor = ACCENT,
+		HAlign = "stretch",
+		MinHeight = ROW_HEIGHT,
+		MaxHeight = ROW_HEIGHT,
+	}, parent)
 end
 
 local function get_panel_parent()
@@ -235,23 +281,27 @@ local function make_button(parent, label, on_press, opts)
 	-- every RepeatInterval ms thereafter (see XButton.lua:119). We expose this
 	-- through opts.repeat_start / opts.repeat_interval so the +/- buttons can
 	-- opt in and discrete actions (Clear All, Activate, etc.) stay single-shot.
+	-- opts.primary picks the accent palette for headline actions (Apply, Generate
+	-- Sea); everything else uses the muted secondary palette.
+	local bg = opts.primary and BUTTON_PRIMARY or BUTTON_BACKGROUND
+	local hover = opts.primary and BUTTON_PRIMARY_ROLLOVER or BUTTON_ROLLOVER
 	local btn = x_button:new({
 		Text = label,
 		Translate = false,
 		TextStyle = TEXT_STYLE,
 		TextColor = TEXT_COLOR,
-		RolloverTextColor = TEXT_COLOR,
-		PressedTextColor = TEXT_COLOR,
+		RolloverTextColor = RGB(255, 255, 255),
+		PressedTextColor = RGB(255, 255, 255),
 		HAlign = opts.halign or "stretch",
 		MinWidth = opts.min_width or 220,
 		MaxWidth = opts.max_width or 260,
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
-		Padding = box(6, 2, 6, 2),
-		Background = BUTTON_BACKGROUND,
-		FocusedBackground = BUTTON_ROLLOVER,
-		RolloverBackground = BUTTON_ROLLOVER,
-		PressedBackground = BUTTON_ROLLOVER,
+		Padding = box(6, 3, 6, 3),
+		Background = bg,
+		FocusedBackground = bg,
+		RolloverBackground = hover,
+		PressedBackground = hover,
 		RepeatStart = opts.repeat_start or 0,
 		RepeatInterval = opts.repeat_interval or 0,
 	}, parent)
@@ -280,11 +330,12 @@ local function make_number_edit(parent, opts)
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
 		Padding = box(6, 2, 6, 2),
-		Background = BUTTON_BACKGROUND,
-		BorderColor = TEXT_COLOR,
+		Background = RGBA(8, 14, 20, 235),
+		BorderWidth = 1,
+		BorderColor = RGBA(120, 210, 230, 90),
 		TextColor = TEXT_COLOR,
 		DisabledTextColor = TEXT_COLOR,
-		HintColor = RGBA(255, 255, 255, 128),
+		HintColor = TEXT_MUTED,
 		IsInRange = true,
 		MinValue = opts.min_value or 0,
 		MaxValue = opts.max_value or 1000,
@@ -325,7 +376,7 @@ function UI.Show()
 		HAlign = "right",
 		VAlign = "top",
 		Margins = box(0, 460, 18, 0),
-		Padding = box(8, 8, 8, 8),
+		Padding = box(10, 0, 10, 10),
 		LayoutMethod = "VList",
 		LayoutVSpacing = ROW_SPACING,
 		Background = PANEL_BACKGROUND,
@@ -334,15 +385,23 @@ function UI.Show()
 		ChildrenHandleMouse = true,
 	}, parent)
 
+	-- Header band: accent-coloured title bar that spans the panel width.
 	x_label:new({
 		Text = "MARTIAN WATERS",
 		Translate = false,
-		TextStyle = TEXT_STYLE,
-		TextColor = TEXT_COLOR,
+		TextStyle = TITLE_STYLE,
+		TextColor = RGB(245, 252, 255),
+		TextHAlign = "center",
+		TextVAlign = "center",
 		HAlign = "stretch",
-		MinHeight = ROW_HEIGHT,
-		MaxHeight = ROW_HEIGHT,
+		MinHeight = TITLE_HEIGHT,
+		MaxHeight = TITLE_HEIGHT,
+		Margins = box(-10, 0, -10, 6),
+		Padding = box(10, 4, 10, 4),
+		Background = HEADER_BACKGROUND,
 	}, panel)
+
+	add_section(panel, "WATER")
 
 	-- Toggle button
 	local toggle = make_button(panel, "Activate Water Mode", function()
@@ -355,7 +414,7 @@ function UI.Show()
 		Text = "Click a hole to start",
 		Translate = false,
 		TextStyle = TEXT_STYLE,
-		TextColor = TEXT_COLOR,
+		TextColor = TEXT_MUTED,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
@@ -511,7 +570,7 @@ function UI.Show()
 		Text = "volume:  --",
 		Translate = false,
 		TextStyle = TEXT_STYLE,
-		TextColor = TEXT_COLOR,
+		TextColor = TEXT_MUTED,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
@@ -520,7 +579,7 @@ function UI.Show()
 		Text = "surface: --",
 		Translate = false,
 		TextStyle = TEXT_STYLE,
-		TextColor = TEXT_COLOR,
+		TextColor = TEXT_MUTED,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
@@ -559,7 +618,7 @@ function UI.Show()
 			end
 		end
 		UI.Refresh()
-	end, { halign = "stretch", min_width = 100, max_width = 120 })
+	end, { halign = "stretch", min_width = 100, max_width = 120, primary = true })
 
 	make_button(action_row, "Clear All Water", function()
 		if type(MartianWaters.ClearAll) == "function" then
@@ -575,7 +634,7 @@ function UI.Show()
 			MartianWaters.Sea.Generate()
 		end
 		UI.Refresh()
-	end)
+	end, { primary = true })
 
 	-- Sea level row: dedicated control for the sea's global level (m above the
 	-- map's lowest terrain). -/+ adjust it live; Apply commits a typed value.
@@ -596,21 +655,13 @@ function UI.Show()
 	end
 
 	-- Rain section
-	x_label:new({
-		Text = "RAIN",
-		Translate = false,
-		TextStyle = TEXT_STYLE,
-		TextColor = TEXT_COLOR,
-		HAlign = "stretch",
-		MinHeight = ROW_HEIGHT,
-		MaxHeight = ROW_HEIGHT,
-	}, panel)
+	add_section(panel, "RAIN")
 
 	local rain_label = x_label:new({
 		Text = "Rain: none",
 		Translate = false,
 		TextStyle = TEXT_STYLE,
-		TextColor = TEXT_COLOR,
+		TextColor = TEXT_MUTED,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
