@@ -471,13 +471,15 @@ function UI.Show()
 	local fill_margins = box(-20, -10, -20, -18)
 	local x_blur = rawget(_G, "XBlurRect")
 	if x_blur then
+		-- Plain rectangular frost (no Mask) so the blue fills the panel edge-to-
+		-- edge, matching the full-width title/footer banners. A cool-dark TintColor
+		-- keeps the body dark like the infopanel (the frame above adds a thin edge).
 		x_blur:new({
 			Id = "MartianWatersBlur",
 			Dock = "box",
 			Margins = fill_margins,
 			BlurRadius = 18,
-			Mask = "UI/InfopanelRemaster/ip_background.png",
-			FrameLeft = 12, FrameTop = 12, FrameRight = 12, FrameBottom = 12,
+			TintColor = RGBA(120, 140, 158, 255),
 			HandleMouse = false,
 		}, panel)
 	end
