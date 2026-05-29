@@ -837,35 +837,39 @@ function UI.Show()
 		UI.Refresh()
 	end)
 
-	-- Footer hint bar, echoing the infopanel's bottom action strip: the native
-	-- sub-pad band with a usage hint. (The real input-glyph hint widget is tied
-	-- to the build/input context, so this is a styled text hint instead.)
+	-- Footer hint bar, echoing the infopanel's bottom "Select" strip: a dark band
+	-- with a centred left-mouse glyph + short action text.
 	local footer = x_window:new({
 		Id = "MW_Footer",
 		HAlign = "stretch",
 		MinHeight = SECTION_HEIGHT,
 		MaxHeight = SECTION_HEIGHT,
 		Margins = box(-16, 6, -16, -14),   -- span to the panel edges + bottom
-		Padding = box(12, 0, 12, 0),
+		Background = RGBA(6, 12, 20, 160), -- darker than the body, like the vanilla footer
 	}, panel)
-	if x_frame then
-		x_frame:new({
-			Dock = "box",
-			Image = "UI/InfopanelRemaster/ip_sub_pad.png",
-			FrameBox = box(15, 8, 8, 10),
-			Transparency = 90,
+	local footer_row = x_window:new({
+		LayoutMethod = "HList",
+		LayoutHSpacing = 6,
+		HAlign = "center",
+		VAlign = "center",
+	}, footer)
+	local x_image_f = rawget(_G, "XImage")
+	if x_image_f then
+		x_image_f:new({
+			MinWidth = 22, MaxWidth = 22, MinHeight = 22, MaxHeight = 22,
+			VAlign = "center",
+			Image = "UI/Common/mouse_left_click.tga",
+			ImageFit = "smallest",
 			HandleMouse = false,
-		}, footer)
+		}, footer_row)
 	end
 	x_label:new({
-		Text = "Water Mode: click a hole to place or select water",
+		Text = "Place / select water",
 		Translate = false,
 		TextStyle = TEXT_STYLE,
 		TextColor = TEXT_MUTED,
 		VAlign = "center",
-		HAlign = "left",
-		Dock = "box",
-	}, footer)
+	}, footer_row)
 
 	MartianWaters.State.ui_panel = panel
 	UI.Refresh()
