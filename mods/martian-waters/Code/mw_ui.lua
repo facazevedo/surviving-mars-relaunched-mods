@@ -457,41 +457,21 @@ function UI.Show()
 		ChildrenHandleMouse = true,
 	}, parent)
 
-	-- Native infopanel body, reproduced exactly as InfopanelSection builds it:
-	--   1) a frosted XBlurRect that blurs the map behind the panel (the dark,
-	--      glassy look), masked to the ip_background frame shape;
-	--   2) the ip_background 9-slice XFrame drawn semi-transparent (Transparency
-	--      102, same as vanilla) ON TOP -- this is the subtle blue frame, NOT a
-	--      solid fill, so it tints rather than blocks.
-	-- Both are created before any content so they sit behind it. Each is guarded;
-	-- the flat PANEL_BACKGROUND remains as a fallback if a class/texture is absent.
-	-- Negative margins equal to the panel's padding (16,6,16,14) so the frost +
-	-- frame fill the ENTIRE panel rect, not just the padded content area --
-	-- otherwise the panel's dark Background shows as a border around the frost.
+	-- Panel body: a plain rectangular frosted XBlurRect filling the ENTIRE panel
+	-- (negative margins cancel the padding), with a cool-dark tint for the glassy
+	-- infopanel look. No mask and no bordered frame -- the blue reaches the panel
+	-- edges, the same width as the full-width title/footer banners. (x_frame is
+	-- still resolved here; the title's left cap below uses it.)
 	local fill_margins = box(-20, -10, -20, -18)
+	local x_frame = rawget(_G, "XFrame")
 	local x_blur = rawget(_G, "XBlurRect")
 	if x_blur then
-		-- Plain rectangular frost (no Mask) so the blue fills the panel edge-to-
-		-- edge, matching the full-width title/footer banners. A cool-dark TintColor
-		-- keeps the body dark like the infopanel (the frame above adds a thin edge).
 		x_blur:new({
 			Id = "MartianWatersBlur",
 			Dock = "box",
 			Margins = fill_margins,
 			BlurRadius = 18,
 			TintColor = RGBA(120, 140, 158, 255),
-			HandleMouse = false,
-		}, panel)
-	end
-	local x_frame = rawget(_G, "XFrame")
-	if x_frame then
-		x_frame:new({
-			Id = "MartianWatersFrame",
-			Dock = "box",
-			Margins = fill_margins,
-			Image = "UI/InfopanelRemaster/ip_background.png",
-			FrameBox = box(12, 12, 12, 12),
-			Transparency = 102,
 			HandleMouse = false,
 		}, panel)
 	end
