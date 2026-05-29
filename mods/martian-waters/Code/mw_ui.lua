@@ -488,29 +488,68 @@ function UI.Show()
 		}, panel)
 	end
 
-	-- Title, vanilla-infopanel style: cyan, left-aligned, on a subtly darker band
-	-- at the top of the frosted body, with a hairline separator beneath it.
+	-- Title banner, reconstructed from the vanilla infopanel's own title art
+	-- (see Infopanel.lua "Title"): the stretched angled tab (rollover_title_right
+	-- at ImageFit "stretch-x") spanning the width, a rounded left cap
+	-- (rollover_title_left, 9-slice), both ~half transparent; a cyan accent bar
+	-- and cyan title over them, and a bright bottom hairline. Guarded -- falls
+	-- back to a plain cyan title if the classes/textures are unavailable.
+	local x_image2 = rawget(_G, "XImage")
+	local title_row = x_window:new({
+		Id = "MW_TitleRow",
+		HAlign = "stretch",
+		MinHeight = TITLE_HEIGHT,
+		MaxHeight = TITLE_HEIGHT,
+		Margins = box(-16, -6, -16, 2),    -- span to the frame edges + top
+	}, panel)
+	-- Stretched angled banner across the full width (drawn first => behind).
+	if x_image2 then
+		x_image2:new({
+			Dock = "box",
+			Image = "UI/CommonRemaster/rollover_title_right.png",
+			ImageFit = "stretch-x",
+			Transparency = 110,
+			Background = RGBA(255, 255, 255, 0),
+			HandleMouse = false,
+		}, title_row)
+	end
+	-- Rounded left cap.
+	if x_frame then
+		x_frame:new({
+			Dock = "left",
+			MinWidth = 64, MaxWidth = 64,
+			Image = "UI/CommonRemaster/rollover_title_left.png",
+			FrameBox = box(10, 0, 20, 20),
+			Transparency = 110,
+			HandleMouse = false,
+		}, title_row)
+	end
+	-- Cyan accent bar at the far left.
+	x_window:new({
+		Dock = "left",
+		MinWidth = 5, MaxWidth = 5,
+		Margins = box(0, 6, 0, 6),
+		Background = ACCENT,
+		HandleMouse = false,
+	}, title_row)
+	-- Title text.
 	x_label:new({
 		Text = "MARTIAN WATERS",
 		Translate = false,
 		TextStyle = TITLE_STYLE,
 		TextColor = ACCENT,
-		TextHAlign = "left",
-		TextVAlign = "center",
+		Dock = "left",
+		VAlign = "center",
+		Margins = box(12, 0, 0, 0),
+	}, title_row)
+	-- Bright bottom hairline (matches the vanilla title underline).
+	x_window:new({
+		Dock = "bottom",
 		HAlign = "stretch",
-		MinHeight = TITLE_HEIGHT,
-		MaxHeight = TITLE_HEIGHT,
-		Margins = box(-16, -6, -16, 0),   -- span to the frame edges + top
-		Padding = box(16, 4, 10, 4),
-		Background = RGBA(0, 0, 0, 70),
-	}, panel)
-	x_window:new({                         -- hairline separator under the title
-		HAlign = "stretch",
-		MinHeight = 2,
-		MaxHeight = 2,
-		Margins = box(-12, 0, -12, 4),
-		Background = RGBA(120, 210, 230, 70),
-	}, panel)
+		MinHeight = 1, MaxHeight = 1,
+		Background = RGBA(255, 252, 239, 210),
+		HandleMouse = false,
+	}, title_row)
 
 	add_section(panel, "WATER", "UI/IconsRemaster/Sections/terraforming.png")
 
