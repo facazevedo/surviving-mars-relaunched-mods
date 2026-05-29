@@ -837,6 +837,36 @@ function UI.Show()
 		UI.Refresh()
 	end)
 
+	-- Footer hint bar, echoing the infopanel's bottom action strip: the native
+	-- sub-pad band with a usage hint. (The real input-glyph hint widget is tied
+	-- to the build/input context, so this is a styled text hint instead.)
+	local footer = x_window:new({
+		Id = "MW_Footer",
+		HAlign = "stretch",
+		MinHeight = SECTION_HEIGHT,
+		MaxHeight = SECTION_HEIGHT,
+		Margins = box(-16, 6, -16, -14),   -- span to the panel edges + bottom
+		Padding = box(12, 0, 12, 0),
+	}, panel)
+	if x_frame then
+		x_frame:new({
+			Dock = "box",
+			Image = "UI/InfopanelRemaster/ip_sub_pad.png",
+			FrameBox = box(15, 8, 8, 10),
+			Transparency = 90,
+			HandleMouse = false,
+		}, footer)
+	end
+	x_label:new({
+		Text = "Water Mode: click a hole to place or select water",
+		Translate = false,
+		TextStyle = TEXT_STYLE,
+		TextColor = TEXT_MUTED,
+		VAlign = "center",
+		HAlign = "left",
+		Dock = "box",
+	}, footer)
+
 	MartianWaters.State.ui_panel = panel
 	UI.Refresh()
 	DebugLog.Info(SCOPE, "panel shown")
