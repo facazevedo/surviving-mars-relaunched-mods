@@ -471,10 +471,19 @@ function UI.Show()
 			Dock = "box",
 			Margins = fill_margins,
 			BlurRadius = 18,
-			TintColor = RGBA(120, 140, 158, 255),
 			HandleMouse = false,
 		}, panel)
 	end
+	-- Translucent blue overlay across the whole panel, recreating the blue tint
+	-- the ip_background frame used to give -- but as a plain full-rect fill (no
+	-- 9-slice border), so the blue reaches the panel edges instead of insetting.
+	x_window:new({
+		Id = "MartianWatersTint",
+		Dock = "box",
+		Margins = fill_margins,
+		Background = RGBA(26, 52, 80, 140),
+		HandleMouse = false,
+	}, panel)
 
 	-- Title, mirroring the vanilla Infopanel "Title" structure (the "Drone Hub"
 	-- banner): a left group = rounded cap (rollover_title_left, XFrame) + cyan
