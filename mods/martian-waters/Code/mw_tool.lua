@@ -443,4 +443,23 @@ function Tool.OnMapUnloaded()
 	clear_current()
 end
 
+-- Remove every water marker the mod placed and forget its segments. Called by the
+-- panel's Clear Waters button and by Lifecycle.Disable().
+function MartianWaters.ClearAll()
+	local map = current_map()
+	local Water = MartianWaters.Water
+	local segments = MartianWaters.State.segments
+	local removed = 0
+	for id, seg in pairs(segments) do
+		if Water and seg.water_obj then
+			Water.RemoveMarker(map, seg.water_obj, seg.bbox)
+		end
+		segments[id] = nil
+		removed = removed + 1
+	end
+	clear_current()
+	DebugLog.Info(SCOPE, "ClearAll", { removed = removed })
+	return removed
+end
+
 MartianWaters.Tool = Tool

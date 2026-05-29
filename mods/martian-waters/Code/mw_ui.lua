@@ -1,34 +1,23 @@
--- MartianWaters -- right-side panel hosting the water tool and the rain buttons.
+-- MartianWaters -- the draggable right-side control panel.
 --
--- Layout:
---   ┌────────────────────────────┐
---   │           MARTIAN WATERS           │   <- title
---   ├────────────────────────────┤
---   │  [ Activate Water Mode ]   │   <- toggle (changes label when active)
---   │  source depth: shallow     │   <- status: depth class at the source
---   │  height (lvl): [__] [-][+] │   <- instant water level in m (live)
---   │  inflow:       [__] [-][+] │   <- source discharge in m^3/s (live)
---   │  drainage:     [__] [-][+] │   <- player drain in m^3/s (live)
---   │  evaporation:  [__] [-][+] │   <- evaporation loss in m^3/s (live)
---   │  infiltration: [__] [-][+] │   <- infiltration loss in m^3/s (live)
---   │  volume:  N m^3             │   <- read-only live volume
---   │  surface: N m^2             │   <- read-only live water surface area
---   │  [ Apply ] [ Clear All ]   │   <- Apply commits all typed field values
---   │  sea level:   [__] [-][+]  │   <- >0 generates/sets the sea; <=0 removes it
---   │                            │
---   │           RAIN             │   <- section label
---   │  Rain: none                │   <- status (disaster preset / visual on)
---   │  [ Start/Stop Rain ]       │   <- one toggle for the disaster
---   │  [ Start/Stop Rain (visual) ] │ <- one toggle for the cosmetic override
---   └────────────────────────────┘
+-- Sections, top to bottom:
+--   title bar (drag handle) + close (X)
+--   [ Activate Waters Mode ]          -- toggles the click-to-place water tool
+--   FRESH WATER  -- status line, then per-source rows: Height / Inflow / Drainage
+--                   / Evaporation / Infiltration  [ (unit)  input  - + ], then the
+--                   Volume / Surface / Flooded Tiles readouts
+--   SEA          -- Sea Level row (>0 generates/sets the sea, <=0 removes it)
+--   RAIN         -- disaster toggle + visual-only toggle
+--   CLOUDS       -- cloud-shadow toggle + Coverage / Speed rows
+--   footer       -- [ Clear Waters ] + info button (hover = field guide)
 --
 -- Lifecycle:
---   MartianWaters.UI.Show()      -- (re)create the panel and attach to GetHUD()
---   MartianWaters.UI.Hide()      -- destroy the panel
---   MartianWaters.UI.Refresh()   -- update labels (called by r_tool when state changes)
+--   UI.Show()    -- (re)create the panel, attached to GetHUD()
+--   UI.Hide()    -- destroy the panel
+--   UI.Refresh() -- update labels/fields from live state
 --
--- The panel is created on OnMsg.NewMapLoaded by mw_lifecycle.lua and destroyed
--- on OnMsg.DoneMap. It is NOT shown on the main menu.
+-- Created on OnMsg.NewMapLoaded (mw_lifecycle.lua), destroyed on OnMsg.DoneMap;
+-- not shown on the main menu.
 
 local MartianWaters = rawget(_G, "MartianWaters")
 if type(MartianWaters) ~= "table" then
@@ -43,45 +32,28 @@ local UI = {}
 local PANEL_ID = "MartianWatersWaterToolPanel"
 
 -- ----------------------------------------------------------------------------
--- Theme: a modern, water-themed palette + a small typographic hierarchy built
--- from existing engine TextStyles (no custom-font registration needed):
---   TITLE_STYLE   "CommonMessageDescription" -- Source Sans Pro, 20
---   SECTION_STYLE "ConsoleLog"               -- Droid Sans Bold, 13
---   TEXT_STYLE    "EditorText"               -- Droid Sans, 13 (body/fields/buttons)
--- Every control overrides TextColor explicitly, so the styles' built-in colours
--- don't matter -- only their font + size do.
+-- Theme. Text uses the vanilla infopanel's own (already-loaded) TextStyles so it
+-- matches the game's aesthetic; one extra style for the unit superscript ships in
+-- mw_textstyles.lua. Controls override TextColor where needed.
 -- ----------------------------------------------------------------------------
 local ACCENT = RGB(120, 210, 230)                -- cyan accent
 local TEXT_COLOR = RGB(232, 240, 245)            -- primary text
 local TEXT_MUTED = RGB(150, 172, 184)            -- status lines / readouts / hints
 
--- Use the vanilla infopanel's own TextStyles directly. (Registering custom
--- TextStyles at runtime crashes -- the font isn't put through the engine's
--- load-time pipeline, so GetFontId rejects it -- so we can't apply a "-1pt"
--- size this way; that would need a proper TextStyle Data preset shipped with
--- the mod.)
 local TITLE_STYLE   = "InfopanelTitleR"     -- LibelSuit, 26
 local SECTION_STYLE = "InfopanelTextBlueR"  -- cyan, 20
 local READOUT_STYLE = "InfopanelTextR"      -- white, 18
--- Body text (param-row labels, buttons, field text, footer) uses the SAME
--- font as the volume/surface readouts so everything below the title shares one
--- typeface, per request. (Was "EditorText"/Droid Sans 13.)
-local TEXT_STYLE    = "InfopanelTextR"      -- white, 18 -- matches READOUT_STYLE
+local TEXT_STYLE    = "InfopanelTextR"      -- white, 18 -- labels/buttons/fields share this
 
--- Transparent: the panel's body is the frosted XBlurRect + the semi-transparent
--- ip_background frame (like the real infopanel). A flat opaque layer here would
--- just darken the frost and kill the glassy look. (If the blur ever fails to
--- render, the panel would be see-through -- acceptable, the frame still shows.)
+-- Transparent root: the panel body is the frosted XBlurRect + a translucent blue
+-- tint (built in UI.Show), so a solid layer here would just kill the glassy look.
 local PANEL_BACKGROUND = RGBA(0, 0, 0, 0)
-local PANEL_WIDTH = 340                           -- fixed width so labels never clip
-                                                  -- (widened to fit the "(unit)" column
-                                                  -- between each label and its input field)
+local PANEL_WIDTH = 340                           -- fixed width (fits the label + "(unit)"
+                                                  -- + input + steppers columns without clipping)
 
 local BUTTON_BACKGROUND = RGBA(32, 46, 56, 235)  -- secondary button
 local BUTTON_ROLLOVER = RGBA(48, 74, 90, 245)
 local BUTTON_ACTIVE = RGB(40, 130, 110)          -- water-mode ON toggle
-local BUTTON_PRIMARY = RGBA(26, 96, 120, 242)    -- accent action (Apply / Generate Sea)
-local BUTTON_PRIMARY_ROLLOVER = RGBA(34, 122, 150, 250)
 
 local ROW_HEIGHT = 26
 -- Input row height: snug around the number font (same style as the labels) with a
@@ -200,7 +172,6 @@ local function destroy_panel()
 	MartianWaters.State.ui_panel = false
 	MartianWaters.State.ui_toggle_button = false
 	MartianWaters.State.ui_level_label = false
-	MartianWaters.State.ui_rain_label = false
 	MartianWaters.State.ui_rain_disaster_button = false
 	MartianWaters.State.ui_rain_visual_button = false
 	MartianWaters.State.ui_flow_edit = false
@@ -209,7 +180,9 @@ local function destroy_panel()
 	MartianWaters.State.ui_evaporation_edit = false
 	MartianWaters.State.ui_infiltration_edit = false
 	MartianWaters.State.ui_volume_label = false
+	MartianWaters.State.ui_volume_digit = false
 	MartianWaters.State.ui_area_label = false
+	MartianWaters.State.ui_area_digit = false
 	MartianWaters.State.ui_tiles_label = false
 	MartianWaters.State.ui_sealevel_edit = false
 	MartianWaters.State.ui_cloud_toggle_button = false
@@ -243,14 +216,7 @@ local function format_float(n, decimals)
 	return string.format("%." .. tostring(decimals or 2) .. "f", n)
 end
 
--- Push the segment's current discharge / level into the input fields. We only
--- write a field that does NOT currently hold keyboard focus -- otherwise we'd
--- clobber what the player is typing mid-keystroke. The check uses the global
--- GetKeyboardFocus() (XDesktop.lua:144); if it isn't available we err on the
--- side of not touching the field, which is the safe direction.
--- Each entry maps an input field's State handle to the segment field it
--- mirrors. The live refresh writes the current value into every field that
--- isn't being typed in.
+-- Each entry maps an input field's State handle to the segment field it mirrors.
 local INPUT_FIELDS = {
 	{ state_key = "ui_height_edit", seg_field = "actual_level_m" },
 	{ state_key = "ui_flow_edit", seg_field = "discharge_m3s" },
@@ -259,11 +225,9 @@ local INPUT_FIELDS = {
 	{ state_key = "ui_infiltration_edit", seg_field = "infiltration_m3s" },
 }
 
--- Push the segment's current values into the input fields. We only write a
--- field that does NOT currently hold keyboard focus -- otherwise we'd clobber
--- what the player is typing mid-keystroke. The check uses the global
--- GetKeyboardFocus() (XDesktop.lua:144); if it isn't available we err on the
--- side of not touching the field, which is the safe direction.
+-- Push each segment field's value into its input field, except one that currently
+-- holds keyboard focus (don't clobber mid-typing). GetKeyboardFocus is a global;
+-- if it's unavailable we err on not touching the field.
 local function refresh_input_fields(seg)
 	local get_focus = rawget(_G, "GetKeyboardFocus")
 	local focused = type(get_focus) == "function" and get_focus() or nil
@@ -301,33 +265,24 @@ local function refresh_input_fields(seg)
 	end
 end
 
--- Read-only readouts: volume (m^3), water surface area (m^2), and flooded tile
--- count -- each on its own line. Surface area is the flooded tile area;
--- flooded_area_wu2 -> m^2 divides by guim^2.
--- Wrap a superscript glyph in the larger shipped TextStyle (mw_textstyles.lua)
--- so it renders bigger while staying raised. Only works in XText readouts (which
--- parse tags); if the style id is missing we fall back to the bare glyph.
-local function sup(glyph)
-	local style = MartianWaters.SUPERSCRIPT_STYLE
-	if type(style) ~= "string" then return glyph end
-	return "<style " .. style .. ">" .. glyph .. "</style>"
+-- A superscript readout is a prefix text ("Volume: N m") plus a separate small
+-- raised unit digit (same approach as the field units). Set the prefix and show
+-- the digit only when there's a value (hidden on the "--" placeholder).
+local function set_super_readout(prefix_key, digit_key, prefix_text, has_value)
+	local prefix = MartianWaters.State[prefix_key]
+	if is_window_alive(prefix) then pcall(function() prefix:SetText(prefix_text) end) end
+	local digit = MartianWaters.State[digit_key]
+	if is_window_alive(digit) then pcall(function() digit:SetVisible(has_value and true or false) end) end
 end
 
 local function update_readouts(seg)
-	local vol_label = MartianWaters.State.ui_volume_label
-	if is_window_alive(vol_label) then
-		local text = seg and ("Volume: " .. format_float(seg.volume_m3 or 0, 1) .. " m" .. sup("³")) or "Volume: --"
-		pcall(function() vol_label:SetText(text) end)
-	end
-	local area_label = MartianWaters.State.ui_area_label
-	if is_window_alive(area_label) then
-		local text = seg and ("Surface: " .. format_float((seg.flooded_area_wu2 or 0) / (guim * guim), 1) .. " m" .. sup("²")) or "Surface: --"
-		pcall(function() area_label:SetText(text) end)
-	end
+	set_super_readout("ui_volume_label", "ui_volume_digit",
+		seg and ("Volume: " .. format_float(seg.volume_m3 or 0, 1) .. " m") or "Volume: --", seg ~= nil)
+	set_super_readout("ui_area_label", "ui_area_digit",
+		seg and ("Surface: " .. format_float((seg.flooded_area_wu2 or 0) / (guim * guim), 1) .. " m") or "Surface: --", seg ~= nil)
 	local tiles_label = MartianWaters.State.ui_tiles_label
 	if is_window_alive(tiles_label) then
-		local text = seg and ("Flooded Tiles: " .. tostring(seg.flooded_tile_count or 0)) or "Flooded Tiles: --"
-		pcall(function() tiles_label:SetText(text) end)
+		pcall(function() tiles_label:SetText(seg and ("Flooded Tiles: " .. tostring(seg.flooded_tile_count or 0)) or "Flooded Tiles: --") end)
 	end
 end
 
@@ -393,15 +348,11 @@ local function make_button(parent, label, on_press, opts)
 	opts = opts or {}
 	local x_button = rawget(_G, "XTextButton")
 	if not x_button then return nil end
-	-- RepeatStart > 0 makes XButton auto-fire OnPress while the mouse stays
-	-- pressed on the button: after RepeatStart ms it begins firing, then
-	-- every RepeatInterval ms thereafter (see XButton.lua:119). We expose this
-	-- through opts.repeat_start / opts.repeat_interval so the +/- buttons can
-	-- opt in and discrete actions (Clear All, Activate, etc.) stay single-shot.
-	-- opts.primary picks the accent palette for headline actions (Apply, Generate
-	-- Sea); everything else uses the muted secondary palette.
-	local bg = opts.primary and BUTTON_PRIMARY or BUTTON_BACKGROUND
-	local hover = opts.primary and BUTTON_PRIMARY_ROLLOVER or BUTTON_ROLLOVER
+	-- RepeatStart > 0 makes XButton auto-fire OnPress while the mouse stays pressed
+	-- (see XButton.lua); the +/- steppers opt in via opts.repeat_start/interval,
+	-- discrete actions stay single-shot.
+	local bg = BUTTON_BACKGROUND
+	local hover = BUTTON_ROLLOVER
 	-- Icon buttons (the +/- spinbox arrows) show only the arrow glyph -- no dark
 	-- box behind it. A faint translucent rollover keeps press feedback.
 	if opts.icon then
@@ -449,21 +400,13 @@ local function make_button(parent, label, on_press, opts)
 	return btn
 end
 
--- Attach a single-line XNumberEdit to `parent`. The edit is passive: it only
--- holds the typed value until a caller (the Apply button below) reads it via
--- `:GetNumber()`. Returns the edit handle, or nil if XNumberEdit is unavailable.
---
--- XControl's default TextColor is RGB(32,32,32) (near-black), which is unreadable
--- on this dark panel; we override TextColor + DisabledTextColor to the panel's
--- white so the typed value matches the labels. HintColor stays slightly
--- transparent so the hint reads as placeholder text rather than a real value.
+-- Attach a single-line XNumberEdit to `parent`. The +/- steppers commit changes
+-- live; the field shows the current value. XControl's default text colour is
+-- near-black, so we override TextColor/DisabledTextColor to the panel white.
 local function make_number_edit(parent, opts)
 	opts = opts or {}
 	local x_number = rawget(_G, "XNumberEdit")
 	if not x_number then return nil end
-	-- The input holds just the number; the unit is shown as a separate "(m3/s)"
-	-- element between the label and the field (built in make_param_row), so the
-	-- value stays clean and the unit's superscript can use the larger style.
 	return x_number:new({
 		Translate = false,
 		TextStyle = TEXT_STYLE,
@@ -552,9 +495,8 @@ function UI.Show()
 			HandleMouse = false,
 		}, panel)
 	end
-	-- Translucent blue overlay across the whole panel, recreating the blue tint
-	-- the ip_background frame used to give -- but as a plain full-rect fill (no
-	-- 9-slice border), so the blue reaches the panel edges instead of insetting.
+	-- Translucent blue tint across the whole panel (a plain full-rect fill that
+	-- reaches the edges), giving the frost its cool infopanel-blue colour.
 	x_window:new({
 		Id = "MartianWatersTint",
 		Dock = "box",
@@ -685,9 +627,8 @@ function UI.Show()
 	}, panel)
 	MartianWaters.State.ui_level_label = level_label
 
-	-- One row per source-parameter: [ label  input  -  + ]. The -/+ buttons
-	-- commit immediately via on_adjust(delta). The input is passive: it just
-	-- holds whatever the player has typed until the Apply button reads it.
+	-- One row per parameter: [ label  (unit)  input  -  + ]. The -/+ buttons commit
+	-- immediately via on_adjust(delta); the input mirrors the live value.
 	local repeat_start = (MartianWaters.Config and MartianWaters.Config.HYDRO_BUTTON_REPEAT_START_MS) or 300
 	local repeat_interval = (MartianWaters.Config and MartianWaters.Config.HYDRO_BUTTON_REPEAT_INTERVAL_MS) or 150
 
@@ -891,14 +832,12 @@ function UI.Show()
 		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, infiltration input field omitted")
 	end
 
-	-- Read-only readouts: live volume, surface area, and flooded tile count, each
-	-- on its own line. Created as XText (not XLabel) so the unit's superscript can
-	-- be rendered larger via a "<style ...>" run (see update_readouts); XLabel
-	-- doesn't parse tags. Falls back to XLabel if XText is unavailable.
+	-- Read-only readouts: volume, surface area, flooded tile count -- each on its
+	-- own line. Volume/Surface carry a unit superscript rendered the SAME way as the
+	-- field units: a prefix XText plus a separate small raised digit.
 	local x_text = rawget(_G, "XText")
-	-- Taller than a normal row so the enlarged superscript (the bigger 30px style
-	-- run) fits the line box; zero padding + Clip off as a safety net.
 	local READOUT_HEIGHT = 34
+	-- A plain single-control readout line (Flooded Tiles, and the no-XText fallback).
 	local function make_readout(initial)
 		local cls = x_text or x_label
 		local props = {
@@ -910,25 +849,48 @@ function UI.Show()
 			MinHeight = READOUT_HEIGHT,
 			MaxHeight = READOUT_HEIGHT,
 		}
-		if x_text then
-			props.WordWrap = false
-			props.Clip = false
-			props.Padding = box(0, 0, 0, 0)
-		end
+		if x_text then props.WordWrap = false end
 		return cls:new(props, panel)
 	end
-	MartianWaters.State.ui_volume_label = make_readout("Volume: --")
-	MartianWaters.State.ui_area_label = make_readout("Surface: --")
+	-- "<prefix> m" + a small raised unit digit. Returns (prefix, digit) so
+	-- update_readouts can set the text and show/hide the digit. The digit starts
+	-- hidden (the initial value is the "--" placeholder).
+	local function make_super_readout(digit_char)
+		if not x_text then return make_readout(""), nil end
+		local row = x_window:new({
+			LayoutMethod = "HList", LayoutHSpacing = 0,
+			HAlign = "stretch", VAlign = "center",
+			MinHeight = READOUT_HEIGHT, MaxHeight = READOUT_HEIGHT,
+		}, panel)
+		local function piece(props)
+			props.Translate = false
+			props.TextStyle = props.TextStyle or READOUT_STYLE
+			props.TextColor = TEXT_COLOR
+			props.HAlign = "left"
+			props.VAlign = "center"
+			props.WordWrap = false
+			props.Padding = box(0, 0, 0, 0)
+			props.MinHeight = READOUT_HEIGHT
+			props.MaxHeight = READOUT_HEIGHT
+			props.HandleMouse = false
+			return x_text:new(props, row)
+		end
+		local prefix = piece({ Text = "" })
+		local digit = piece({ Text = digit_char, TextStyle = MartianWaters.SUPERSCRIPT_STYLE,
+			Margins = box(0, -6, 0, 0), Visible = false })
+		return prefix, digit
+	end
+	MartianWaters.State.ui_volume_label, MartianWaters.State.ui_volume_digit = make_super_readout("3")
+	MartianWaters.State.ui_area_label, MartianWaters.State.ui_area_digit = make_super_readout("2")
 	MartianWaters.State.ui_tiles_label = make_readout("Flooded Tiles: --")
 
 	-- Sea section: its own banner, separating the map-wide sea control from the
 	-- per-source fresh-water controls above.
 	add_section(panel, "SEA", "UI/Icons/res_water.png", 3)  -- shrink the drop to match the Rain glyph
 
-	-- Sea level row: the sole sea control. A positive level auto-generates the
-	-- sea (flooding the whole map below it) or sets it; dropping to <= 0 removes
-	-- the sea. -/+ adjust it live; Apply commits a typed value. Acts on the sea
-	-- regardless of which marker is selected.
+	-- Sea level row: the sole sea control. A positive level auto-generates the sea
+	-- (flooding the whole map below it) or sets it; <= 0 removes the sea. -/+ adjust
+	-- it live, independent of which marker is selected.
 	local sealevel_edit = make_param_row({
 		id = "MartianWatersSeaLevelRow",
 		label = "Sea Level:",

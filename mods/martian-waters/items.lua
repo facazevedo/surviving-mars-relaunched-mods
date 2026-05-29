@@ -16,10 +16,6 @@ return {
 		'CodeFileName', "Code/mw_textstyles.lua",
 	}),
 	PlaceObj('ModItemCode', {
-		'name', "mw_terrain",
-		'CodeFileName', "Code/mw_terrain.lua",
-	}),
-	PlaceObj('ModItemCode', {
 		'name', "mw_water",
 		'CodeFileName', "Code/mw_water.lua",
 	}),
@@ -46,10 +42,6 @@ return {
 	PlaceObj('ModItemCode', {
 		'name', "mw_clouds",
 		'CodeFileName', "Code/mw_clouds.lua",
-	}),
-	PlaceObj('ModItemCode', {
-		'name', "mw_api",
-		'CodeFileName', "Code/mw_api.lua",
 	}),
 	PlaceObj('ModItemCode', {
 		'name', "mw_tool",

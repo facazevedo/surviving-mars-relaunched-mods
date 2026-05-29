@@ -15,44 +15,12 @@ local config = {}
 config.EnableMod = true
 
 -- ============================================================================
--- DEFAULT RIVER SHAPE
+-- WATER BODY FOOTPRINT
 -- ============================================================================
--- Used when MartianWaters.Create / MartianWaters.Demo is called without explicit overrides.
--- Distances are in world units (1 meter = guim = 100 wu). The defaults aim for
--- a "big" river: ~20 hex wide, deep enough that the engine reliably fills it.
---
--- DefaultWidthMeters     -- inner channel half-width where the carved height
---                           reaches its minimum (the flat bottom of the bowl).
--- DefaultBankMeters      -- outer ring beyond the inner width over which the
---                           carved height smooths back up to the existing
---                           terrain. Wider banks = gentler slopes.
--- DefaultDepthMeters     -- how far BELOW the lowest existing terrain height
---                           along the path the bowl floor sits.
--- DefaultWaterLevelMeters -- how far ABOVE the bowl floor the water marker is
---                           placed. Must be < DefaultDepthMeters or the engine
---                           will report a map-wide water spill and clamp the
---                           level down. ~70% of depth is a safe default.
--- DefaultStepMeters      -- spacing between consecutive carve circles along the
---                           path. Smaller = smoother but more SetHeightCircle
---                           calls. The default is half of DefaultWidthMeters.
+-- DefaultWidthMeters is the half-size of the bounding box used when a click-placed
+-- water marker is dropped (the engine expands it as needed when neighbouring water
+-- objects merge). Distances are in world units via guim.
 config.DefaultWidthMeters = 30
-config.DefaultBankMeters = 15
-config.DefaultDepthMeters = 8
-config.DefaultWaterLevelMeters = 5
-config.DefaultStepMeters = 15
-
--- ============================================================================
--- DEMO PATH
--- ============================================================================
--- MartianWaters.Demo() builds a single curved river across the loaded map for quick
--- testing. The points below are fractions of the map width/height (0..100).
--- Three points produce a gentle S; add more for a longer or more winding river.
-config.DemoPathPercents = {
-	{ 10, 50 },
-	{ 35, 35 },
-	{ 60, 65 },
-	{ 90, 50 },
-}
 
 -- ============================================================================
 -- WATER TOOL (click-to-fill mode)
@@ -171,8 +139,8 @@ config.FloodScanMarginMeters = 50           -- padding around segment bbox for t
 -- ============================================================================
 -- SEA GENERATION
 -- ============================================================================
--- "Generate Sea" floods every tile of the map that sits below a global sea
--- level, measured in meters ABOVE the map's lowest terrain point. The flood is
+-- Setting a positive Sea Level floods every tile of the map that sits below a
+-- global sea level, measured in meters ABOVE the map's lowest terrain point. The flood is
 -- done by the engine's own water grid (one TerrainWaterObject at the lowest
 -- point, applied map-wide with spill-avoidance off), not the per-segment
 -- flood-fill -- so it's cheap and the sea is a single static body.
@@ -184,16 +152,6 @@ config.SeaLevelMeters = 10
 config.SeaScanSamples = 64
 config.SeaLevelStepMeters = 1     -- sea-level field + / - step (m)
 config.SeaLevelMaxMeters = 200    -- soft cap on the sea-level input field
-
--- ============================================================================
--- SAFETY
--- ============================================================================
--- The carve operation iterates SetHeightCircle calls along the path. If a path
--- is malformed (zero length, off-map points) the mod aborts early instead of
--- looping forever. These caps bound runaway calls in case a future caller
--- passes unusual data.
-config.MaxPathPoints = 64           -- refuse paths with more than N control points
-config.MaxStepsPerSegment = 512     -- refuse path segments longer than this many carve steps
 
 -- ============================================================================
 -- DEBUG LOGGING
@@ -246,12 +204,6 @@ local C = {}
 C.ENABLE_MOD = as_bool(config.EnableMod)
 
 C.DEFAULT_WIDTH_METERS = as_number(config.DefaultWidthMeters, 30)
-C.DEFAULT_BANK_METERS = as_number(config.DefaultBankMeters, 15)
-C.DEFAULT_DEPTH_METERS = as_number(config.DefaultDepthMeters, 8)
-C.DEFAULT_WATER_LEVEL_METERS = as_number(config.DefaultWaterLevelMeters, 5)
-C.DEFAULT_STEP_METERS = as_number(config.DefaultStepMeters, 15)
-
-C.DEMO_PATH_PERCENTS = config.DemoPathPercents
 
 C.DEFAULT_RAIN_PRESET = type(config.DefaultRainPreset) == "string" and config.DefaultRainPreset or "Normal_Low"
 
@@ -263,9 +215,6 @@ C.CLOUD_SPEED_MAX_M = as_number(config.CloudSpeedMaxM, 50)
 C.WATER_TOOL_START_LEVEL_METERS = as_number(config.WaterToolStartLevelMeters, 5)
 C.WATER_TOOL_STEP_METERS = as_number(config.WaterToolStepMeters, 1)
 C.WATER_TOOL_SELECT_RADIUS_M = as_number(config.WaterToolSelectRadiusM, 25)
-
-C.MAX_PATH_POINTS = as_number(config.MaxPathPoints, 64)
-C.MAX_STEPS_PER_SEGMENT = as_number(config.MaxStepsPerSegment, 512)
 
 C.DEPTH_WET_M = as_number(config.DepthWetMeters, 0.01)
 C.DEPTH_SHALLOW_M = as_number(config.DepthShallowMeters, 0.20)

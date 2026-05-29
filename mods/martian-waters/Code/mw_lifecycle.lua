@@ -1,12 +1,10 @@
 -- MartianWaters -- lifecycle: enable, disable, OnMsg wiring.
 --
--- The prototype is intentionally minimal:
---   * Enable() flips an internal flag and logs. It does NOT touch the map on
---     its own -- river creation is player-driven via MartianWaters.Create / Demo /
---     CreateAtCursor.
+-- Intentionally minimal:
+--   * Enable() flips an internal flag and logs. It does NOT touch the map on its
+--     own -- water is player-driven via the click tool (mw_tool.lua).
 --   * Disable() calls MartianWaters.ClearAll() so any markers placed by the mod are
---     removed (water drains via ApplyAllWaterObjects). Terrain carving is not
---     reverted -- see mw_terrain.lua for the prototype caveat.
+--     removed (water drains via ApplyAllWaterObjects).
 --   * OnMsg.DoneMap fires when a map is unloaded; we clear in-memory segment
 --     handles because the engine destroys the marker objects with the map.
 --

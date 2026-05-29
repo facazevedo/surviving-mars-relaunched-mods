@@ -15,7 +15,6 @@
 --   MartianWaters.State.ui_panel         -- right-side panel handle (mw_ui.lua)
 --   MartianWaters.State.ui_toggle_button -- panel button handle  (mw_ui.lua)
 --   MartianWaters.State.ui_level_label   -- panel label handle   (mw_ui.lua)
---   MartianWaters.State.ui_rain_label    -- panel rain label     (mw_ui.lua)
 --   MartianWaters.State.rain_visual_on   -- visual rain override active (mw_rain.lua)
 --   MartianWaters.State.cloud_shadows_on -- cloud-shadow render flag mirror (mw_clouds.lua)
 --   MartianWaters.State.cloud_coverage_raw -- held CloudsCoverage raw value (mw_clouds.lua)
@@ -77,9 +76,9 @@ MartianWaters.State = MartianWaters.State or {
 	enabled = false,
 }
 
--- Mint a fresh segment id and register the segment record. Both the batch
--- carve API (mw_api.lua) and the click tool (mw_tool.lua) call this, so the id
--- namespace and segment-table shape stay in one place.
+-- Mint a fresh segment id and register the segment record. The click tool
+-- (mw_tool.lua) calls this, keeping the id namespace and segment-table shape
+-- in one place.
 function MartianWaters.State:RegisterSegment(seg)
 	local id = "mw_" .. tostring(self.next_id)
 	self.next_id = self.next_id + 1

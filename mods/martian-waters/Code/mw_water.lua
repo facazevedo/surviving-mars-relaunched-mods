@@ -15,8 +15,7 @@
 --   MartianWaters.Water.RemoveMarker(map, obj, bbox)
 --
 -- Reversibility: deleting the marker and re-running ApplyAllWaterObjects on
--- the bbox makes the engine drain the water. Terrain heights are NOT restored
--- by this module -- see mw_terrain.lua for the prototype caveat.
+-- the bbox makes the engine drain the water.
 
 local MartianWaters = rawget(_G, "MartianWaters")
 if type(MartianWaters) ~= "table" then
