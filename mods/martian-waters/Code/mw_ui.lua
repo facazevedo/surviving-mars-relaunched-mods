@@ -51,23 +51,50 @@ local PANEL_ID = "MartianWatersWaterToolPanel"
 -- Every control overrides TextColor explicitly, so the styles' built-in colours
 -- don't matter -- only their font + size do.
 -- ----------------------------------------------------------------------------
--- Reuse the vanilla infopanel's own TextStyles so the panel reads as native:
---   InfopanelTitleR    LibelSuit, 26  -- big header title ("RC Explorer #1")
---   InfopanelTextBlueR LibelSuit, 20  -- cyan section titles ("Status", ...)
---   InfopanelTextR     SchemeBk,  18  -- white value rows
--- The dense interactive rows stay on a smaller style so they remain compact.
-local TITLE_STYLE = "InfopanelTitleR"
-local SECTION_STYLE = "InfopanelTextBlueR"
-local READOUT_STYLE = "InfopanelTextR"
-local TEXT_STYLE = "EditorText"
+local ACCENT = RGB(120, 210, 230)                -- cyan accent
+local TEXT_COLOR = RGB(232, 240, 245)            -- primary text
+local TEXT_MUTED = RGB(150, 172, 184)            -- status lines / readouts / hints
+
+-- Register custom TextStyles cloned from the vanilla infopanel's fonts but one
+-- point smaller (per request). TextStyle has GlobalMap = "TextStyles" and is an
+-- official mod-item preset, so a PlaceObj at load registers into the global
+-- TextStyles table that XControl resolves against. If registration ever fails,
+-- we fall back to the stock infopanel style ids (which are 1pt larger).
+local function reg_style(id, font, size, color, fallback)
+	local presets = rawget(_G, "Presets")
+	if presets and presets.TextStyle and presets.TextStyle[id] then
+		return id
+	end
+	local place = rawget(_G, "PlaceObj")
+	if type(place) == "function" then
+		pcall(place, "TextStyle", {
+			id = id,
+			group = "MartianWaters",
+			FontName = font,
+			FontSize = size,
+			TextColor = color,
+			RolloverTextColor = color,
+			ShadowType = "shadow",
+			ShadowSize = 1,
+			save_in = "",
+		})
+	end
+	local styles = rawget(_G, "TextStyles")
+	if styles and styles[id] then
+		return id
+	end
+	return fallback
+end
+
+local TITLE_STYLE   = reg_style("MW_Title",   "LibelSuitRg-Regular", 25, RGBA(245, 252, 255, 255), "InfopanelTitleR")
+local SECTION_STYLE = reg_style("MW_Section", "LibelSuitRg-Regular", 19, RGBA(120, 210, 230, 255), "InfopanelTextBlueR")
+local READOUT_STYLE = reg_style("MW_Readout", "SchemeBk-Regular",    17, RGBA(232, 240, 245, 255), "InfopanelTextR")
+local TEXT_STYLE    = reg_style("MW_Body",    "Droid Sans",          12, RGBA(232, 240, 245, 255), "EditorText")
 
 local PANEL_BACKGROUND = RGBA(14, 22, 30, 232)   -- deep slate, mostly opaque for readability
 local HEADER_BACKGROUND = RGBA(22, 78, 99, 245)  -- teal title band
 local SECTION_BAND = RGBA(46, 78, 96, 130)       -- translucent band behind section titles
-local SEPARATOR_COLOR = RGBA(255, 255, 255, 28)  -- hairline section divider
-local ACCENT = RGB(120, 210, 230)                -- cyan accent
-local TEXT_COLOR = RGB(232, 240, 245)            -- primary text
-local TEXT_MUTED = RGB(150, 172, 184)            -- status lines / readouts / hints
+local PANEL_WIDTH = 300                           -- fixed width so labels never clip
 
 local BUTTON_BACKGROUND = RGBA(32, 46, 56, 235)  -- secondary button
 local BUTTON_ROLLOVER = RGBA(48, 74, 90, 245)
@@ -304,8 +331,8 @@ local function make_button(parent, label, on_press, opts)
 		RolloverTextColor = RGB(255, 255, 255),
 		PressedTextColor = RGB(255, 255, 255),
 		HAlign = opts.halign or "stretch",
-		MinWidth = opts.min_width or 220,
-		MaxWidth = opts.max_width or 260,
+		MinWidth = opts.min_width or 120,
+		MaxWidth = opts.max_width or PANEL_WIDTH,
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
 		Padding = box(6, 3, 6, 3),
@@ -388,6 +415,8 @@ function UI.Show()
 		VAlign = "top",
 		Margins = box(0, 460, 18, 0),
 		Padding = box(10, 0, 10, 10),
+		MinWidth = PANEL_WIDTH,
+		MaxWidth = PANEL_WIDTH,
 		LayoutMethod = "VList",
 		LayoutVSpacing = ROW_SPACING,
 		Background = PANEL_BACKGROUND,
@@ -438,14 +467,15 @@ function UI.Show()
 	local repeat_start = (MartianWaters.Config and MartianWaters.Config.HYDRO_BUTTON_REPEAT_START_MS) or 300
 	local repeat_interval = (MartianWaters.Config and MartianWaters.Config.HYDRO_BUTTON_REPEAT_INTERVAL_MS) or 150
 
+	-- Column widths sum to the panel's inner width (PANEL_WIDTH - 20 padding):
+	-- 96 label + 100 input + 30 + 30 + 3*4 spacing = 268 <= 280.
+	local LABEL_W, INPUT_W, STEP_W = 96, 100, 30
 	local function make_param_row(opts, on_adjust)
 		local row = x_window:new({
 			Id = opts.id,
 			LayoutMethod = "HList",
 			LayoutHSpacing = 4,
 			HAlign = "stretch",
-			MinWidth = 220,
-			MaxWidth = 260,
 		}, panel)
 
 		x_label:new({
@@ -455,16 +485,16 @@ function UI.Show()
 			TextColor = TEXT_COLOR,
 			HAlign = "left",
 			VAlign = "center",
-			MinWidth = 56,
-			MaxWidth = 56,
+			MinWidth = LABEL_W,
+			MaxWidth = LABEL_W,
 			MinHeight = ROW_HEIGHT,
 			MaxHeight = ROW_HEIGHT,
 		}, row)
 
 		local edit = make_number_edit(row, {
-			halign = "stretch",
-			min_width = 80,
-			max_width = 110,
+			halign = "left",
+			min_width = INPUT_W,
+			max_width = INPUT_W,
 			min_value = 0,
 			max_value = opts.max_value,
 			hint = opts.hint,
@@ -475,7 +505,7 @@ function UI.Show()
 			on_adjust(-(opts.step or 1))
 			UI.Refresh()
 		end, {
-			halign = "stretch", min_width = 32, max_width = 40,
+			halign = "left", min_width = STEP_W, max_width = STEP_W,
 			repeat_start = repeat_start, repeat_interval = repeat_interval,
 		})
 
@@ -484,7 +514,7 @@ function UI.Show()
 			on_adjust(opts.step or 1)
 			UI.Refresh()
 		end, {
-			halign = "stretch", min_width = 32, max_width = 40,
+			halign = "left", min_width = STEP_W, max_width = STEP_W,
 			repeat_start = repeat_start, repeat_interval = repeat_interval,
 		})
 
