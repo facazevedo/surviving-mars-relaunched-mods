@@ -17,6 +17,14 @@
 --   MartianWaters.State.ui_level_label   -- panel label handle   (mw_ui.lua)
 --   MartianWaters.State.ui_rain_label    -- panel rain label     (mw_ui.lua)
 --   MartianWaters.State.rain_visual_on   -- visual rain override active (mw_rain.lua)
+--   MartianWaters.State.cloud_shadows_on -- cloud-shadow render flag mirror (mw_clouds.lua)
+--   MartianWaters.State.cloud_coverage_raw -- held CloudsCoverage raw value (mw_clouds.lua)
+--   MartianWaters.State.cloud_speed_raw  -- held CloudsSpeed raw value     (mw_clouds.lua)
+--   MartianWaters.State.cloud_override_active -- player changed a cloud value; reapply
+--                                 --   coverage/speed after lightmodel transitions (mw_clouds.lua)
+--   MartianWaters.State.ui_cloud_toggle_button   -- CLOUDS shadow toggle   (mw_ui.lua)
+--   MartianWaters.State.ui_cloud_coverage_edit   -- CLOUDS coverage field  (mw_ui.lua)
+--   MartianWaters.State.ui_cloud_speed_edit      -- CLOUDS speed field     (mw_ui.lua)
 --   MartianWaters.State.budget_thread    -- game-time ticker handle (mw_budget.lua)
 --   MartianWaters.State.rebuild_queue    -- FIFO of segment ids awaiting a heavy water-grid
 --                                 --   rebuild; drained up to HYDRO_MAX_REBUILDS_PER_TICK

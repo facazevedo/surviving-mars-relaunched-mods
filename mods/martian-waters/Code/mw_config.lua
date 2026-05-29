@@ -87,6 +87,22 @@ config.WaterToolSelectRadiusM = 25
 config.DefaultRainPreset = "Normal_Low"
 
 -- ============================================================================
+-- CLOUDS (UI controls)
+-- ============================================================================
+-- The CLOUDS section drives the engine's cloud-SHADOW system (the editor's
+-- "Show cloud shadows" toggle, plus the CloudsCoverage / CloudsSpeed scene
+-- params). Coverage is a percentage (0..100, raw 0..1000); speed is in m/s
+-- (engine raw range 0..50*guim, scale 1000 -> ~0..5 m/s).
+config.CloudCoverageStepPct = 10   -- coverage + / - step (%)
+config.CloudCoverageMaxPct = 100   -- soft cap on the coverage input field
+config.CloudSpeedStepM = 1         -- speed + / - step (m/s)
+config.CloudSpeedMaxM = 50         -- soft cap on the speed input field. Engine range
+                                   -- is 0..(50*guim) at scale 1000 => 0..50 m/s
+                                   -- (guim == 1000). Shipped lightmodels run ~7 m/s,
+                                   -- so a cap of 5 clamped real values DOWN -- hence
+                                   -- "+ did nothing". 50 covers the full engine range.
+
+-- ============================================================================
 -- HYDROLOGY -- depth classification
 -- ============================================================================
 -- Depth (meters of water above terrain at the sampled point) is bucketed into
@@ -120,12 +136,15 @@ config.HydroInitialDischargeM3S = 0         -- inflow of a freshly created segme
 config.HydroDrainageStepM3S = 0.5           -- drainage + / - step (m^3/s)
 config.HydroDrainageMaxM3S = 100            -- soft cap on the drainage input field
 config.HydroInitialDrainageM3S = 0          -- drainage of a freshly created segment
-config.HydroEvaporationStepM3S = 0.1        -- evaporation + / - step (m^3/s)
+config.HydroEvaporationStepM3S = 0.5        -- evaporation + / - step (m^3/s)
 config.HydroEvaporationMaxM3S = 100         -- soft cap on the evaporation input field
-config.HydroInitialEvaporationM3S = 0.1     -- default evaporation level (m^3/s)
-config.HydroInfiltrationStepM3S = 0.1       -- infiltration + / - step (m^3/s)
+config.HydroInitialEvaporationM3S = 1.0     -- default evaporation level (m^3/s) -- a
+                                            -- new pool slowly recedes if left unfed;
+                                            -- raise/lower it live with the +/- buttons
+config.HydroInfiltrationStepM3S = 0.5       -- infiltration + / - step (m^3/s)
 config.HydroInfiltrationMaxM3S = 100        -- soft cap on the infiltration input field
-config.HydroInitialInfiltrationM3S = 0.05   -- default infiltration level (m^3/s)
+config.HydroInitialInfiltrationM3S = 0.5    -- default infiltration level (m^3/s),
+                                            -- the slower ground-soak loss; changeable too
 config.HydroLevelStepMeters = 0.5           -- height + / - step (m), bypasses the budget
 config.HydroLevelMaxMeters = 50             -- soft cap on the height input field
 config.HydroApplyStepMeters = 1.0           -- min level change (m) before the budget tick
@@ -182,7 +201,7 @@ config.MaxStepsPerSegment = 512     -- refuse path segments longer than this man
 -- DebugLogs gates all log output. Scoped flags (Debug<Scope>) can be set to
 -- false to silence one scope while DebugLogs stays on. Scopes emitted by this
 -- mod: "Init", "Lifecycle", "API", "Terrain", "Water", "Tool", "UI", "Rain",
---      "Depth", "Flood", "Budget".
+--      "Clouds", "Depth", "Flood", "Budget".
 config.DebugLogs = true
 config.DebugInit = true
 config.DebugLifecycle = true
@@ -192,6 +211,7 @@ config.DebugWater = true
 config.DebugTool = true
 config.DebugUi = true
 config.DebugRain = true
+config.DebugClouds = true
 config.DebugDepth = false
 config.DebugFlood = true
 config.DebugBudget = true
@@ -235,6 +255,11 @@ C.DEMO_PATH_PERCENTS = config.DemoPathPercents
 
 C.DEFAULT_RAIN_PRESET = type(config.DefaultRainPreset) == "string" and config.DefaultRainPreset or "Normal_Low"
 
+C.CLOUD_COVERAGE_STEP_PCT = as_number(config.CloudCoverageStepPct, 10)
+C.CLOUD_COVERAGE_MAX_PCT = as_number(config.CloudCoverageMaxPct, 100)
+C.CLOUD_SPEED_STEP_M = as_number(config.CloudSpeedStepM, 1)
+C.CLOUD_SPEED_MAX_M = as_number(config.CloudSpeedMaxM, 50)
+
 C.WATER_TOOL_START_LEVEL_METERS = as_number(config.WaterToolStartLevelMeters, 5)
 C.WATER_TOOL_STEP_METERS = as_number(config.WaterToolStepMeters, 1)
 C.WATER_TOOL_SELECT_RADIUS_M = as_number(config.WaterToolSelectRadiusM, 25)
@@ -254,12 +279,12 @@ C.HYDRO_INITIAL_DISCHARGE_M3S = as_number(config.HydroInitialDischargeM3S, 0)
 C.HYDRO_DRAINAGE_STEP_M3S = as_number(config.HydroDrainageStepM3S, 0.5)
 C.HYDRO_DRAINAGE_MAX_M3S = as_number(config.HydroDrainageMaxM3S, 100)
 C.HYDRO_INITIAL_DRAINAGE_M3S = as_number(config.HydroInitialDrainageM3S, 0)
-C.HYDRO_EVAPORATION_STEP_M3S = as_number(config.HydroEvaporationStepM3S, 0.1)
+C.HYDRO_EVAPORATION_STEP_M3S = as_number(config.HydroEvaporationStepM3S, 0.5)
 C.HYDRO_EVAPORATION_MAX_M3S = as_number(config.HydroEvaporationMaxM3S, 100)
-C.HYDRO_INITIAL_EVAPORATION_M3S = as_number(config.HydroInitialEvaporationM3S, 0.1)
-C.HYDRO_INFILTRATION_STEP_M3S = as_number(config.HydroInfiltrationStepM3S, 0.1)
+C.HYDRO_INITIAL_EVAPORATION_M3S = as_number(config.HydroInitialEvaporationM3S, 1.0)
+C.HYDRO_INFILTRATION_STEP_M3S = as_number(config.HydroInfiltrationStepM3S, 0.5)
 C.HYDRO_INFILTRATION_MAX_M3S = as_number(config.HydroInfiltrationMaxM3S, 100)
-C.HYDRO_INITIAL_INFILTRATION_M3S = as_number(config.HydroInitialInfiltrationM3S, 0.05)
+C.HYDRO_INITIAL_INFILTRATION_M3S = as_number(config.HydroInitialInfiltrationM3S, 0.5)
 C.HYDRO_LEVEL_STEP_M = as_number(config.HydroLevelStepMeters, 0.5)
 C.HYDRO_LEVEL_MAX_M = as_number(config.HydroLevelMaxMeters, 50)
 C.HYDRO_APPLY_STEP_M = as_number(config.HydroApplyStepMeters, 1.0)
@@ -285,6 +310,7 @@ C.DEBUG_WATER = as_bool(config.DebugWater)
 C.DEBUG_TOOL = as_bool(config.DebugTool)
 C.DEBUG_UI = as_bool(config.DebugUi)
 C.DEBUG_RAIN = as_bool(config.DebugRain)
+C.DEBUG_CLOUDS = as_bool(config.DebugClouds)
 C.DEBUG_DEPTH = as_bool(config.DebugDepth)
 C.DEBUG_FLOOD = as_bool(config.DebugFlood)
 C.DEBUG_BUDGET = as_bool(config.DebugBudget)

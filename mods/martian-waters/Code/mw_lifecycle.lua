@@ -102,8 +102,14 @@ end
 -- vanilla value stands.
 function OnMsg.LightmodelSetSceneParams(map, view, lm_buf, time, start_offset)
 	if MartianWaters.State.enabled ~= true then return end
-	if not MartianWaters.Rain or type(MartianWaters.Rain.OnLightmodelSetSceneParams) ~= "function" then return end
-	MartianWaters.Rain.OnLightmodelSetSceneParams(map, view, lm_buf, time, start_offset)
+	if MartianWaters.Rain and type(MartianWaters.Rain.OnLightmodelSetSceneParams) == "function" then
+		MartianWaters.Rain.OnLightmodelSetSceneParams(map, view, lm_buf, time, start_offset)
+	end
+	-- Clouds reapply its coverage / speed override the same way (no-op unless the
+	-- player has changed a cloud value this session).
+	if MartianWaters.Clouds and type(MartianWaters.Clouds.OnLightmodelSetSceneParams) == "function" then
+		MartianWaters.Clouds.OnLightmodelSetSceneParams(map, view, lm_buf, time, start_offset)
+	end
 end
 
 -- OnMsg.DoneMap: the engine has destroyed every map-owned object, including

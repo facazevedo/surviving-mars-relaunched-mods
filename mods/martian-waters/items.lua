@@ -12,6 +12,10 @@ return {
 		'CodeFileName', "Code/mw_debug.lua",
 	}),
 	PlaceObj('ModItemCode', {
+		'name', "mw_textstyles",
+		'CodeFileName', "Code/mw_textstyles.lua",
+	}),
+	PlaceObj('ModItemCode', {
 		'name', "mw_terrain",
 		'CodeFileName', "Code/mw_terrain.lua",
 	}),
@@ -38,6 +42,10 @@ return {
 	PlaceObj('ModItemCode', {
 		'name', "mw_rain",
 		'CodeFileName', "Code/mw_rain.lua",
+	}),
+	PlaceObj('ModItemCode', {
+		'name', "mw_clouds",
+		'CodeFileName', "Code/mw_clouds.lua",
 	}),
 	PlaceObj('ModItemCode', {
 		'name', "mw_api",

@@ -259,6 +259,38 @@ function Tool.AdjustSeaLevel(d)
 	return MartianWaters.Sea.AdjustLevel(d)
 end
 
+-- Cloud controls operate on the global sky (not a marker, not the sea), so they
+-- delegate straight to MartianWaters.Clouds. No-op-safe if the module is missing.
+function Tool.AreCloudShadowsEnabled()
+	return MartianWaters.Clouds and MartianWaters.Clouds.AreShadowsEnabled and MartianWaters.Clouds.AreShadowsEnabled() or false
+end
+function Tool.ToggleCloudShadows()
+	if not (MartianWaters.Clouds and MartianWaters.Clouds.ToggleShadows) then return nil, "MartianWaters.Clouds not loaded" end
+	return MartianWaters.Clouds.ToggleShadows()
+end
+function Tool.GetCloudCoverage()
+	return MartianWaters.Clouds and MartianWaters.Clouds.GetCoveragePct and MartianWaters.Clouds.GetCoveragePct() or nil
+end
+function Tool.SetCloudCoverage(v)
+	if not (MartianWaters.Clouds and MartianWaters.Clouds.SetCoveragePct) then return nil, "MartianWaters.Clouds not loaded" end
+	return MartianWaters.Clouds.SetCoveragePct(v)
+end
+function Tool.AdjustCloudCoverage(d)
+	if not (MartianWaters.Clouds and MartianWaters.Clouds.AdjustCoveragePct) then return nil, "MartianWaters.Clouds not loaded" end
+	return MartianWaters.Clouds.AdjustCoveragePct(d)
+end
+function Tool.GetCloudSpeed()
+	return MartianWaters.Clouds and MartianWaters.Clouds.GetSpeedM and MartianWaters.Clouds.GetSpeedM() or nil
+end
+function Tool.SetCloudSpeed(v)
+	if not (MartianWaters.Clouds and MartianWaters.Clouds.SetSpeedM) then return nil, "MartianWaters.Clouds not loaded" end
+	return MartianWaters.Clouds.SetSpeedM(v)
+end
+function Tool.AdjustCloudSpeed(d)
+	if not (MartianWaters.Clouds and MartianWaters.Clouds.AdjustSpeedM) then return nil, "MartianWaters.Clouds not loaded" end
+	return MartianWaters.Clouds.AdjustSpeedM(d)
+end
+
 function Tool.SetDischarge(v) return route("SetDischarge", v) end
 function Tool.AdjustDischarge(d) return route("AdjustDischarge", d) end
 function Tool.SetDrainage(v) return route("SetDrainage", v) end
