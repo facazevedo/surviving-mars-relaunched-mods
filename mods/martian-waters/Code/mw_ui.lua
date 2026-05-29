@@ -51,14 +51,21 @@ local PANEL_ID = "MartianWatersWaterToolPanel"
 -- Every control overrides TextColor explicitly, so the styles' built-in colours
 -- don't matter -- only their font + size do.
 -- ----------------------------------------------------------------------------
-local TITLE_STYLE = "CommonMessageDescription"
-local SECTION_STYLE = "ConsoleLog"
+-- Reuse the vanilla infopanel's own TextStyles so the panel reads as native:
+--   InfopanelTitleR    LibelSuit, 26  -- big header title ("RC Explorer #1")
+--   InfopanelTextBlueR LibelSuit, 20  -- cyan section titles ("Status", ...)
+--   InfopanelTextR     SchemeBk,  18  -- white value rows
+-- The dense interactive rows stay on a smaller style so they remain compact.
+local TITLE_STYLE = "InfopanelTitleR"
+local SECTION_STYLE = "InfopanelTextBlueR"
+local READOUT_STYLE = "InfopanelTextR"
 local TEXT_STYLE = "EditorText"
 
 local PANEL_BACKGROUND = RGBA(14, 22, 30, 232)   -- deep slate, mostly opaque for readability
 local HEADER_BACKGROUND = RGBA(22, 78, 99, 245)  -- teal title band
+local SECTION_BAND = RGBA(46, 78, 96, 130)       -- translucent band behind section titles
 local SEPARATOR_COLOR = RGBA(255, 255, 255, 28)  -- hairline section divider
-local ACCENT = RGB(120, 210, 230)                -- cyan accent for section headers
+local ACCENT = RGB(120, 210, 230)                -- cyan accent
 local TEXT_COLOR = RGB(232, 240, 245)            -- primary text
 local TEXT_MUTED = RGB(150, 172, 184)            -- status lines / readouts / hints
 
@@ -70,7 +77,8 @@ local BUTTON_PRIMARY_ROLLOVER = RGBA(34, 122, 150, 250)
 
 local ROW_HEIGHT = 26
 local ROW_SPACING = 4
-local TITLE_HEIGHT = 36
+local TITLE_HEIGHT = 42
+local SECTION_HEIGHT = 28
 
 local function is_window_alive(win)
 	if not win then return false end
@@ -80,32 +88,23 @@ local function is_window_alive(win)
 	return true
 end
 
--- Thin horizontal divider line stacked in the panel's VList.
-local function add_separator(parent)
-	local x_window = rawget(_G, "XWindow")
-	if not x_window then return end
-	x_window:new({
-		HAlign = "stretch",
-		MinHeight = 2,
-		MaxHeight = 2,
-		Margins = box(0, 4, 0, 2),
-		Background = SEPARATOR_COLOR,
-	}, parent)
-end
-
--- A section header: a divider above + an accent-coloured bold caption.
+-- A section header in the vanilla infopanel style: the cyan title centred on a
+-- translucent full-width band (like "Status" / "Queued tasks" in the screenshot).
 local function add_section(parent, text)
-	add_separator(parent)
 	local x_label = rawget(_G, "XLabel")
 	if not x_label then return end
 	x_label:new({
 		Text = text,
 		Translate = false,
-		TextStyle = SECTION_STYLE,
-		TextColor = ACCENT,
+		TextStyle = SECTION_STYLE,    -- InfopanelTextBlueR: native cyan section title
+		TextHAlign = "center",
+		TextVAlign = "center",
 		HAlign = "stretch",
-		MinHeight = ROW_HEIGHT,
-		MaxHeight = ROW_HEIGHT,
+		MinHeight = SECTION_HEIGHT,
+		MaxHeight = SECTION_HEIGHT,
+		Margins = box(-10, 4, -10, 2),  -- band spans past the panel padding
+		Padding = box(10, 2, 10, 2),
+		Background = SECTION_BAND,
 	}, parent)
 end
 
@@ -412,8 +411,8 @@ function UI.Show()
 	local level_label = x_label:new({
 		Text = "Click a hole to start",
 		Translate = false,
-		TextStyle = TEXT_STYLE,
-		TextColor = TEXT_MUTED,
+		TextStyle = READOUT_STYLE,
+		TextColor = TEXT_COLOR,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
@@ -568,8 +567,8 @@ function UI.Show()
 	MartianWaters.State.ui_volume_label = x_label:new({
 		Text = "volume:  --",
 		Translate = false,
-		TextStyle = TEXT_STYLE,
-		TextColor = TEXT_MUTED,
+		TextStyle = READOUT_STYLE,
+		TextColor = TEXT_COLOR,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
@@ -577,8 +576,8 @@ function UI.Show()
 	MartianWaters.State.ui_area_label = x_label:new({
 		Text = "surface: --",
 		Translate = false,
-		TextStyle = TEXT_STYLE,
-		TextColor = TEXT_MUTED,
+		TextStyle = READOUT_STYLE,
+		TextColor = TEXT_COLOR,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
@@ -651,8 +650,8 @@ function UI.Show()
 	local rain_label = x_label:new({
 		Text = "Rain: none",
 		Translate = false,
-		TextStyle = TEXT_STYLE,
-		TextColor = TEXT_MUTED,
+		TextStyle = READOUT_STYLE,
+		TextColor = TEXT_COLOR,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
