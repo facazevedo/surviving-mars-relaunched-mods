@@ -66,7 +66,6 @@ local READOUT_STYLE = "InfopanelTextR"      -- white, 18
 local TEXT_STYLE    = "EditorText"          -- Droid Sans, 13 (compact rows)
 
 local PANEL_BACKGROUND = RGBA(14, 22, 30, 232)   -- deep slate, mostly opaque for readability
-local HEADER_BACKGROUND = RGBA(22, 78, 99, 245)  -- teal title band
 local SECTION_BAND = RGBA(46, 78, 96, 130)       -- translucent band behind section titles
 local PANEL_WIDTH = 300                           -- fixed width so labels never clip
 
@@ -483,20 +482,28 @@ function UI.Show()
 		}, panel)
 	end
 
-	-- Header band: accent-coloured title bar that spans the panel width.
+	-- Title, vanilla-infopanel style: cyan, left-aligned, on a subtly darker band
+	-- at the top of the frosted body, with a hairline separator beneath it.
 	x_label:new({
 		Text = "MARTIAN WATERS",
 		Translate = false,
 		TextStyle = TITLE_STYLE,
-		TextColor = RGB(245, 252, 255),
-		TextHAlign = "center",
+		TextColor = ACCENT,
+		TextHAlign = "left",
 		TextVAlign = "center",
 		HAlign = "stretch",
 		MinHeight = TITLE_HEIGHT,
 		MaxHeight = TITLE_HEIGHT,
-		Margins = box(-10, 0, -10, 6),
-		Padding = box(10, 4, 10, 4),
-		Background = HEADER_BACKGROUND,
+		Margins = box(-16, -6, -16, 0),   -- span to the frame edges + top
+		Padding = box(16, 4, 10, 4),
+		Background = RGBA(0, 0, 0, 70),
+	}, panel)
+	x_window:new({                         -- hairline separator under the title
+		HAlign = "stretch",
+		MinHeight = 2,
+		MaxHeight = 2,
+		Margins = box(-12, 0, -12, 4),
+		Background = RGBA(120, 210, 230, 70),
 	}, panel)
 
 	add_section(panel, "WATER", "UI/IconsRemaster/Sections/terraforming.png")
