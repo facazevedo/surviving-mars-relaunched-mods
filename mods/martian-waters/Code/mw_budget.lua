@@ -300,10 +300,12 @@ end
 -- is rate-limited two ways: per segment by segment_is_due (the per-meter gate),
 -- and globally by the per-tick cap in Budget.Tick. Snaps applied_level_m to the
 -- current level so the gate measures the next drift from here.
-local function apply_segment(map, seg)
+local function apply_segment(map, seg, sea_z_wu)
 	seg.applied_level_m = seg.actual_level_m or 0
 	if MartianWaters.Flood and type(MartianWaters.Flood.RecomputeSegment) == "function" then
-		MartianWaters.Flood.RecomputeSegment(map, seg)
+		-- Pass the sea surface so the flood-fill flags seg.reached_sea when this
+		-- lake's water has spread down into sea-level terrain (lake -> sea merge).
+		MartianWaters.Flood.RecomputeSegment(map, seg, sea_z_wu)
 	end
 	local Water = MartianWaters.Water
 	if Water and type(Water.SetMarkerLevel) == "function" then
@@ -332,6 +334,16 @@ function Budget.Tick(map, dt_s)
 		MartianWaters.State.rebuild_queue = queue
 	end
 
+	-- If a sea exists, compute its surface height once so the per-lake flood-fill
+	-- can detect a lake growing into the sea (lake -> sea merge).
+	local sea_z_wu
+	if MartianWaters.Sea and type(MartianWaters.Sea.Find) == "function" then
+		local _sea_id, sea_seg = MartianWaters.Sea.Find()
+		if sea_seg then
+			sea_z_wu = (sea_seg.floor_wu or 0) + meters_to_wu(sea_seg.actual_level_m or 0)
+		end
+	end
+
 	-- Phase 1: cheap integration + enqueue newly-due segments (no duplicates).
 	for id, seg in pairs(MartianWaters.State.segments) do
 		if update_segment_volume(seg, dt_s, cfg) and not seg.rebuild_queued then
@@ -352,8 +364,14 @@ function Budget.Tick(map, dt_s)
 			-- Re-check: the segment may have been levelled (instant SetLevel) or
 			-- drifted back since it was queued. Only spend budget if still due.
 			if seg.water_obj and IsValid(seg.water_obj) and segment_is_due(seg, cfg) then
-				apply_segment(map, seg)
+				apply_segment(map, seg, sea_z_wu)
 				processed = processed + 1
+				-- If this lake's flood reached sea-level terrain, it has grown
+				-- into the sea -- merge it in.
+				if sea_z_wu and not seg.is_sea and seg.reached_sea
+					and MartianWaters.Sea and type(MartianWaters.Sea.Absorb) == "function" then
+					MartianWaters.Sea.Absorb(id)
+				end
 			end
 		end
 		-- A stale/invalid/no-longer-due id is simply dropped without cost.

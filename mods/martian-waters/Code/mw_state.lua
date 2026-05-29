@@ -53,6 +53,8 @@
 --     flooded_tile_count = int,
 --     flooded_area_wu2   = int,
 --     surface_area_wu2   = int,                -- equals flooded_area_wu2 for Phase 1
+--     reached_sea        = bool,               -- lake's flood reached sea-level terrain;
+--                                              --   the budget then merges it into the sea
 --   }
 
 local MartianWaters = rawget(_G, "MartianWaters")

@@ -58,7 +58,13 @@ end
 
 -- Run the flood-fill for one segment. Mutates `seg.flooded_tile_count`,
 -- `seg.flooded_area_wu2`, `seg.surface_area_wu2`. Returns the same counts.
-function Flood.RecomputeSegment(map, seg)
+--
+-- sea_z_wu (optional): if given, the walk also flags seg.reached_sea = true when
+-- any flooded tile's terrain sits at or below the sea surface. That means this
+-- (lake) body has spread down into sea-level terrain -- i.e. it has grown into
+-- the sea -- which mw_budget uses to merge the lake into the sea.
+function Flood.RecomputeSegment(map, seg, sea_z_wu)
+	seg.reached_sea = false
 	if not map or type(seg) ~= "table" then
 		return 0, 0
 	end
@@ -114,12 +120,24 @@ function Flood.RecomputeSegment(map, seg)
 		return ix >= lo_ix and iy >= lo_iy and ix <= hi_ix and iy <= hi_iy
 	end
 
-	local function terrain_below_level(ix, iy)
-		-- Sample at the tile centre.
+	local reached_sea = false
+
+	-- Tile height at the tile centre, or nil if off-grid. Side effect: marks
+	-- reached_sea when a sampled tile sits at/below the sea surface.
+	local function tile_height(ix, iy)
 		local cx = ix * tile_wu + tile_wu / 2
 		local cy = iy * tile_wu + tile_wu / 2
 		local h = get_h(map, point(cx, cy))
-		return type(h) == "number" and h < actual_level_wu
+		if type(h) ~= "number" then return nil end
+		if sea_z_wu and h <= sea_z_wu then
+			reached_sea = true
+		end
+		return h
+	end
+
+	local function terrain_below_level(ix, iy)
+		local h = tile_height(ix, iy)
+		return h ~= nil and h < actual_level_wu
 	end
 
 	-- Reject the source itself if its tile centre is above the level -- the
@@ -166,6 +184,7 @@ function Flood.RecomputeSegment(map, seg)
 	seg.flooded_tile_count = count
 	seg.flooded_area_wu2 = area_wu2
 	seg.surface_area_wu2 = area_wu2
+	seg.reached_sea = reached_sea
 
 	if cfg.DEBUG_FLOOD == true then
 		DebugLog.Info(SCOPE, "recompute", {

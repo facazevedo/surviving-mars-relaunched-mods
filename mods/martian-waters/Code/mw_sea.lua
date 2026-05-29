@@ -111,33 +111,48 @@ function Sea.Find()
 	return nil
 end
 
--- Absorb every lake the sea has reached: any non-sea segment whose source point
--- now sits at or below the sea surface (sea_z_wu) is part of the sea, so we
--- delete its marker and segment ("the river becomes a sea"). The sea's own
--- map-wide water object keeps that ground flooded after the lake marker is
--- removed. sea_id is kept as the current marker if an absorbed lake was current.
+-- Absorb a single lake into the sea ("the river becomes a sea"): delete its
+-- marker + segment. The sea's own map-wide water object keeps that ground
+-- flooded after the lake marker is removed. If the absorbed lake was the
+-- current marker, selection falls back to the sea (sea_id). Called both by the
+-- sea-side sweep below and by mw_budget when a lake grows into the sea.
+function Sea.Absorb(seg_id, sea_id)
+	local segments = MartianWaters.State.segments
+	local seg = segments[seg_id]
+	if not seg or seg.is_sea then
+		return false
+	end
+	local map = current_map()
+	local Water = MartianWaters.Water
+	if Water and type(Water.RemoveMarker) == "function" and seg.water_obj then
+		Water.RemoveMarker(map, seg.water_obj, seg.bbox)
+	end
+	segments[seg_id] = nil
+	if MartianWaters.State.current_marker_segment == seg_id then
+		sea_id = sea_id or Sea.Find()
+		local sea_seg = sea_id and segments[sea_id] or nil
+		MartianWaters.State.current_marker = sea_seg and sea_seg.water_obj or false
+		MartianWaters.State.current_marker_segment = sea_id or false
+	end
+	DebugLog.Info(SCOPE, "absorbed lake into sea", { id = seg_id })
+	return true
+end
+
+-- Sweep all lakes whose source point now sits at or below the sea surface
+-- (sea_z_wu) and absorb them. Used right after the sea is placed or raised.
 local function absorb_touching_lakes(map, sea_z_wu, sea_id)
 	local terrain_table = rawget(_G, "terrain")
 	if type(terrain_table) ~= "table" or type(terrain_table.GetHeight) ~= "function" then
 		return 0
 	end
-	local Water = MartianWaters.Water
-	local segments = MartianWaters.State.segments
 	local absorbed = 0
-	for id, seg in pairs(segments) do
+	for id, seg in pairs(MartianWaters.State.segments) do
 		if not seg.is_sea then
 			local th = terrain_table.GetHeight(map, point(seg.marker_x or 0, seg.marker_y or 0))
 			if type(th) == "number" and th <= sea_z_wu then
-				if Water and type(Water.RemoveMarker) == "function" and seg.water_obj then
-					Water.RemoveMarker(map, seg.water_obj, seg.bbox)
+				if Sea.Absorb(id, sea_id) then
+					absorbed = absorbed + 1
 				end
-				segments[id] = nil
-				if MartianWaters.State.current_marker_segment == id then
-					local sea_seg = sea_id and segments[sea_id] or nil
-					MartianWaters.State.current_marker = sea_seg and sea_seg.water_obj or false
-					MartianWaters.State.current_marker_segment = sea_id or false
-				end
-				absorbed = absorbed + 1
 			end
 		end
 	end
