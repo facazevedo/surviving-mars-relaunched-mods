@@ -492,36 +492,39 @@ function UI.Show()
 		}, panel)
 	end
 
-	-- Title banner using the game's own title-bar texture title_pad.png (the same
-	-- XFrame + FrameBox(0,0,35,0) + Transparency 102 the dialog titles use, e.g.
-	-- CommandCenterDialog / DialogTitleNew). FrameBox right=35 keeps the angled
-	-- right cap while stretching the body -> the native angled banner shape.
+	-- Title, mirroring the vanilla Infopanel "Title" structure (the "Drone Hub"
+	-- banner): a left group = rounded cap (rollover_title_left, XFrame) + cyan
+	-- accent bar + cyan title, docked left and sized to content; then a right
+	-- group filling the rest = the stretched angled banner (rollover_title_right,
+	-- XImage stretch-x) + a bright underline. Both images ~half transparent
+	-- (Transparency 128) so the frost shows through, exactly as the infopanel.
+	local x_image = rawget(_G, "XImage")
 	local title_row = x_window:new({
 		Id = "MW_TitleRow",
 		HAlign = "stretch",
 		MinHeight = TITLE_HEIGHT,
 		MaxHeight = TITLE_HEIGHT,
-		Margins = box(-16, -6, -16, 2),    -- span to the frame edges + top
+		Margins = box(-16, -6, -16, 2),
 	}, panel)
+
+	-- Left group: cap + accent bar + title (docked left, content-sized).
+	local left_group = x_window:new({ Dock = "left", MaxHeight = TITLE_HEIGHT }, title_row)
 	if x_frame then
 		x_frame:new({
 			Dock = "box",
-			Image = "UI/CommonRemaster/title_pad.png",
-			FrameBox = box(30, 10, 30, 10),   -- as DialogTitleNew frames title_pad
-			Transparency = 102,
-			SqueezeX = false,
+			Image = "UI/CommonRemaster/rollover_title_left.png",
+			FrameBox = box(10, 0, 20, 20),
+			Transparency = 128,
 			HandleMouse = false,
-		}, title_row)
+		}, left_group)
 	end
-	-- Cyan accent bar at the far left.
 	x_window:new({
 		Dock = "left",
 		MinWidth = 5, MaxWidth = 5,
 		Margins = box(8, 8, 0, 8),
 		Background = ACCENT,
 		HandleMouse = false,
-	}, title_row)
-	-- Title text.
+	}, left_group)
 	x_label:new({
 		Text = "MARTIAN WATERS",
 		Translate = false,
@@ -529,16 +532,31 @@ function UI.Show()
 		TextColor = ACCENT,
 		Dock = "left",
 		VAlign = "center",
-		Margins = box(12, 0, 0, 0),
-	}, title_row)
-	-- Bright bottom hairline (the underline that runs along the vanilla title).
+		Margins = box(10, 0, 18, 0),
+	}, left_group)
+
+	-- Right group: stretched angled banner + underline (fills the rest).
+	local right_group = x_window:new({ Dock = "box", MaxHeight = TITLE_HEIGHT }, title_row)
+	if x_image then
+		x_image:new({
+			Dock = "box",
+			Image = "UI/CommonRemaster/rollover_title_right.png",
+			ImageFit = "stretch-x",
+			Transparency = 128,
+			Background = RGBA(255, 255, 255, 0),
+			HandleMouse = false,
+		}, right_group)
+	end
 	x_window:new({
 		Dock = "bottom",
 		HAlign = "stretch",
+		VAlign = "bottom",
 		MinHeight = 1, MaxHeight = 1,
-		Background = RGBA(255, 252, 239, 210),
+		Margins = box(0, 0, 0, 8),
+		Background = RGBA(255, 252, 239, 255),
+		Transparency = 220,
 		HandleMouse = false,
-	}, title_row)
+	}, right_group)
 
 	add_section(panel, "WATER", "UI/IconsRemaster/Sections/terraforming.png")
 
