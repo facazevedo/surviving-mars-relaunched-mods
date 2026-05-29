@@ -66,7 +66,6 @@ local READOUT_STYLE = "InfopanelTextR"      -- white, 18
 local TEXT_STYLE    = "EditorText"          -- Droid Sans, 13 (compact rows)
 
 local PANEL_BACKGROUND = RGBA(14, 22, 30, 232)   -- deep slate, mostly opaque for readability
-local SECTION_BAND = RGBA(46, 78, 96, 130)       -- translucent band behind section titles
 local PANEL_WIDTH = 300                           -- fixed width so labels never clip
 
 local BUTTON_BACKGROUND = RGBA(32, 46, 56, 235)  -- secondary button
@@ -94,7 +93,6 @@ end
 local function add_section(parent, text, icon)
 	local x_window = rawget(_G, "XWindow")
 	local x_label = rawget(_G, "XLabel")
-	local x_frame = rawget(_G, "XFrame")
 	local x_image = rawget(_G, "XImage")
 	if not x_label then return end
 
@@ -110,16 +108,18 @@ local function add_section(parent, text, icon)
 		Padding = box(8, 0, 8, 0),
 	}, parent)
 
-	-- Sub-pad frame behind the row (native infopanel section background).
-	if x_frame then
-		x_frame:new({
-			Dock = "box",
-			Image = "UI/InfopanelRemaster/ip_sub_pad.png",
-			FrameBox = box(15, 8, 8, 10),
+	-- Subtle dark band + a cyan hairline underneath (like the vanilla section
+	-- divider). The bright blue ip_sub_pad frame read as a solid bar, so we use a
+	-- quiet translucent background instead -- the cyan title + hex icon carry it.
+	pcall(function() row:SetBackground(RGBA(0, 0, 0, 50)) end)
+	if x_window then
+		x_window:new({
+			Dock = "bottom",
+			MinHeight = 1,
+			MaxHeight = 1,
+			Background = RGBA(120, 210, 230, 55),
 			HandleMouse = false,
 		}, row)
-	else
-		pcall(function() row:SetBackground(SECTION_BAND) end)
 	end
 
 	-- Hex section icon: the inactive-hex backing + the themed icon on top, both
@@ -207,9 +207,9 @@ end
 
 local function format_float(n, decimals)
 	if type(n) ~= "number" then return "--" end
-	local mult = 10 ^ (decimals or 2)
-	local r = math.floor(n * mult + 0.5) / mult
-	return tostring(r)
+	-- string.format keeps the trailing decimals (tostring(8.0) drops to "8" in
+	-- this engine's Lua, which made the fields look integer-only).
+	return string.format("%." .. tostring(decimals or 2) .. "f", n)
 end
 
 -- Push the segment's current discharge / level into the input fields. We only
@@ -390,9 +390,9 @@ local function make_number_edit(parent, opts)
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
 		Padding = box(6, 2, 6, 2),
-		Background = RGBA(8, 14, 20, 235),
-		FocusedBackground = RGBA(20, 40, 52, 240),
-		RolloverBackground = RGBA(8, 14, 20, 235),
+		Background = RGBA(0, 0, 0, 100),
+		FocusedBackground = RGBA(20, 40, 52, 170),
+		RolloverBackground = RGBA(0, 0, 0, 100),
 		SelectionColor = RGB(255, 255, 255),
 		SelectionBackground = RGBA(34, 122, 150, 180),  -- teal, not the default bright blue
 		BorderWidth = 1,
