@@ -115,24 +115,71 @@ local function is_window_alive(win)
 	return true
 end
 
--- A section header in the vanilla infopanel style: the cyan title centred on a
--- translucent full-width band (like "Status" / "Queued tasks" in the screenshot).
-local function add_section(parent, text)
+-- A native infopanel-style section header: a hex section icon (the InHHex-masked
+-- icon the game uses) next to a cyan title, over the infopanel's sub-pad frame
+-- texture. Falls back to a plain banded label if the X classes are unavailable.
+local function add_section(parent, text, icon)
+	local x_window = rawget(_G, "XWindow")
 	local x_label = rawget(_G, "XLabel")
+	local x_frame = rawget(_G, "XFrame")
+	local x_image = rawget(_G, "XImage")
 	if not x_label then return end
-	x_label:new({
-		Text = text,
-		Translate = false,
-		TextStyle = SECTION_STYLE,    -- InfopanelTextBlueR: native cyan section title
-		TextHAlign = "center",
-		TextVAlign = "center",
+
+	-- The header row.
+	local row = (x_window or x_label):new({
+		Id = "MW_Section_" .. text,
+		LayoutMethod = "HList",
+		LayoutHSpacing = 6,
 		HAlign = "stretch",
 		MinHeight = SECTION_HEIGHT,
 		MaxHeight = SECTION_HEIGHT,
-		Margins = box(-10, 4, -10, 2),  -- band spans past the panel padding
-		Padding = box(10, 2, 10, 2),
-		Background = SECTION_BAND,
+		Margins = box(-12, 4, -12, 2),
+		Padding = box(8, 0, 8, 0),
 	}, parent)
+
+	-- Sub-pad frame behind the row (native infopanel section background).
+	if x_frame then
+		x_frame:new({
+			Dock = "box",
+			Image = "UI/InfopanelRemaster/ip_sub_pad.png",
+			FrameBox = box(15, 8, 8, 10),
+			HandleMouse = false,
+		}, row)
+	else
+		pcall(function() row:SetBackground(SECTION_BAND) end)
+	end
+
+	-- Hex section icon: the inactive-hex backing + the themed icon on top, both
+	-- masked to the hexagon via Shape "InHHex" (exactly as InfopanelSection does).
+	if x_image and icon then
+		x_image:new({
+			Dock = "left",
+			VAlign = "center",
+			MinWidth = 26, MaxWidth = 26, MinHeight = 26, MaxHeight = 26,
+			Shape = "InHHex",
+			Image = "UI/IconsRemaster/Sections/ip_sections_inactive.png",
+			ImageFit = "smallest",
+		}, row)
+		x_image:new({
+			Dock = "left",
+			VAlign = "center",
+			Margins = box(-26, 0, 0, 0),  -- overlay on the hex backing
+			MinWidth = 26, MaxWidth = 26, MinHeight = 26, MaxHeight = 26,
+			Shape = "InHHex",
+			Image = icon,
+			ImageFit = "smallest",
+		}, row)
+	end
+
+	x_label:new({
+		Text = text,
+		Translate = false,
+		TextStyle = SECTION_STYLE,    -- native cyan section title
+		VAlign = "center",
+		HAlign = "left",
+		MinHeight = SECTION_HEIGHT,
+		MaxHeight = SECTION_HEIGHT,
+	}, row)
 end
 
 local function get_panel_parent()
@@ -324,12 +371,14 @@ local function make_button(parent, label, on_press, opts)
 	local bg = opts.primary and BUTTON_PRIMARY or BUTTON_BACKGROUND
 	local hover = opts.primary and BUTTON_PRIMARY_ROLLOVER or BUTTON_ROLLOVER
 	local btn = x_button:new({
-		Text = label,
+		Text = opts.icon and "" or label,
 		Translate = false,
 		TextStyle = TEXT_STYLE,
 		TextColor = TEXT_COLOR,
 		RolloverTextColor = RGB(255, 255, 255),
 		PressedTextColor = RGB(255, 255, 255),
+		Icon = opts.icon,                    -- native arrow image for spinbox steppers
+		IconScale = opts.icon and point(700, 700) or nil,
 		HAlign = opts.halign or "stretch",
 		MinWidth = opts.min_width or 120,
 		MaxWidth = opts.max_width or PANEL_WIDTH,
@@ -369,6 +418,10 @@ local function make_number_edit(parent, opts)
 		MaxHeight = ROW_HEIGHT,
 		Padding = box(6, 2, 6, 2),
 		Background = RGBA(8, 14, 20, 235),
+		FocusedBackground = RGBA(20, 40, 52, 240),
+		RolloverBackground = RGBA(8, 14, 20, 235),
+		SelectionColor = RGB(255, 255, 255),
+		SelectionBackground = RGBA(34, 122, 150, 180),  -- teal, not the default bright blue
 		BorderWidth = 1,
 		BorderColor = RGBA(120, 210, 230, 90),
 		TextColor = TEXT_COLOR,
@@ -425,13 +478,13 @@ function UI.Show()
 		ChildrenHandleMouse = true,
 	}, parent)
 
-	-- Native infopanel frame: the game's own 9-slice background texture stretched
-	-- to fill the panel, drawn behind all content (created first => lowest draw
-	-- order; Dock "box" fills + keeps it out of the VList flow). If the texture is
-	-- missing the flat PANEL_BACKGROUND colour still shows underneath.
-	local x_image = rawget(_G, "XImage")
-	if x_image then
-		x_image:new({
+	-- Native infopanel frame: XFrame is the engine's 9-slice image-frame window
+	-- (the same class + texture the real infopanel uses). Docked "box" it fills
+	-- the panel behind all content (created first => lowest draw order). If XFrame
+	-- or the texture is unavailable the flat PANEL_BACKGROUND still shows.
+	local x_frame = rawget(_G, "XFrame")
+	if x_frame then
+		x_frame:new({
 			Id = "MartianWatersFrame",
 			Dock = "box",
 			Image = "UI/InfopanelRemaster/ip_background.png",
@@ -456,7 +509,7 @@ function UI.Show()
 		Background = HEADER_BACKGROUND,
 	}, panel)
 
-	add_section(panel, "WATER")
+	add_section(panel, "WATER", "UI/IconsRemaster/Sections/terraforming.png")
 
 	-- Toggle button
 	local toggle = make_button(panel, "Activate Water Mode", function()
@@ -521,6 +574,7 @@ function UI.Show()
 			UI.Refresh()
 		end, {
 			halign = "left", min_width = STEP_W, max_width = STEP_W,
+			icon = "UI/CommonRemaster/arrow_remove.png",
 			repeat_start = repeat_start, repeat_interval = repeat_interval,
 		})
 
@@ -530,6 +584,7 @@ function UI.Show()
 			UI.Refresh()
 		end, {
 			halign = "left", min_width = STEP_W, max_width = STEP_W,
+			icon = "UI/CommonRemaster/arrow_add.png",
 			repeat_start = repeat_start, repeat_interval = repeat_interval,
 		})
 
@@ -703,7 +758,7 @@ function UI.Show()
 	end
 
 	-- Rain section
-	add_section(panel, "RAIN")
+	add_section(panel, "RAIN", "UI/IconsRemaster/Sections/dust.png")
 
 	local rain_label = x_label:new({
 		Text = "Rain: none",
