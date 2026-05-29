@@ -49,8 +49,12 @@ local BUTTON_BACKGROUND = RGBA(30, 40, 45, 230)
 local BUTTON_ROLLOVER = RGBA(55, 70, 78, 240)
 local BUTTON_ACTIVE = RGBA(80, 130, 90, 240)
 local TEXT_COLOR = RGB(255, 255, 255)
-local ROW_HEIGHT = 28
-local ROW_SPACING = 4
+-- Smaller font for a more compact panel. "GedConsole" is FontSize 10 (vs
+-- "ConsoleLog" 13); every control overrides TextColor to white, so the style's
+-- own colour doesn't matter.
+local TEXT_STYLE = "GedConsole"
+local ROW_HEIGHT = 20
+local ROW_SPACING = 3
 
 local function is_window_alive(win)
 	if not win then return false end
@@ -234,7 +238,7 @@ local function make_button(parent, label, on_press, opts)
 	local btn = x_button:new({
 		Text = label,
 		Translate = false,
-		TextStyle = "ConsoleLog",
+		TextStyle = TEXT_STYLE,
 		TextColor = TEXT_COLOR,
 		RolloverTextColor = TEXT_COLOR,
 		PressedTextColor = TEXT_COLOR,
@@ -269,7 +273,7 @@ local function make_number_edit(parent, opts)
 	if not x_number then return nil end
 	return x_number:new({
 		Translate = false,
-		TextStyle = "ConsoleLog",
+		TextStyle = TEXT_STYLE,
 		HAlign = opts.halign or "stretch",
 		MinWidth = opts.min_width or 100,
 		MaxWidth = opts.max_width or 140,
@@ -320,7 +324,7 @@ function UI.Show()
 		Dock = "box",
 		HAlign = "right",
 		VAlign = "top",
-		Margins = box(0, 320, 18, 0),
+		Margins = box(0, 460, 18, 0),
 		Padding = box(8, 8, 8, 8),
 		LayoutMethod = "VList",
 		LayoutVSpacing = ROW_SPACING,
@@ -333,7 +337,7 @@ function UI.Show()
 	x_label:new({
 		Text = "MARTIAN WATERS",
 		Translate = false,
-		TextStyle = "ConsoleLog",
+		TextStyle = TEXT_STYLE,
 		TextColor = TEXT_COLOR,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
@@ -350,7 +354,7 @@ function UI.Show()
 	local level_label = x_label:new({
 		Text = "Click a hole to start",
 		Translate = false,
-		TextStyle = "ConsoleLog",
+		TextStyle = TEXT_STYLE,
 		TextColor = TEXT_COLOR,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
@@ -377,7 +381,7 @@ function UI.Show()
 		x_label:new({
 			Text = opts.label,
 			Translate = false,
-			TextStyle = "ConsoleLog",
+			TextStyle = TEXT_STYLE,
 			TextColor = TEXT_COLOR,
 			HAlign = "left",
 			VAlign = "center",
@@ -506,7 +510,7 @@ function UI.Show()
 	MartianWaters.State.ui_volume_label = x_label:new({
 		Text = "volume:  --",
 		Translate = false,
-		TextStyle = "ConsoleLog",
+		TextStyle = TEXT_STYLE,
 		TextColor = TEXT_COLOR,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
@@ -515,7 +519,7 @@ function UI.Show()
 	MartianWaters.State.ui_area_label = x_label:new({
 		Text = "surface: --",
 		Translate = false,
-		TextStyle = "ConsoleLog",
+		TextStyle = TEXT_STYLE,
 		TextColor = TEXT_COLOR,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
@@ -595,7 +599,7 @@ function UI.Show()
 	x_label:new({
 		Text = "RAIN",
 		Translate = false,
-		TextStyle = "ConsoleLog",
+		TextStyle = TEXT_STYLE,
 		TextColor = TEXT_COLOR,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
@@ -605,7 +609,7 @@ function UI.Show()
 	local rain_label = x_label:new({
 		Text = "Rain: none",
 		Translate = false,
-		TextStyle = "ConsoleLog",
+		TextStyle = TEXT_STYLE,
 		TextColor = TEXT_COLOR,
 		HAlign = "stretch",
 		MinHeight = ROW_HEIGHT,
