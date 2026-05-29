@@ -436,11 +436,13 @@ function UI.Show()
 
 	-- Match scenario-editor's anchor: top-right, with a vertical margin below
 	-- the resource bar so we don't collide with vanilla HUD chrome.
+	-- No Dock: the panel is a free-floating, alignment-positioned window (top-
+	-- right initially) so the XMoveControl title bar can reposition it by setting
+	-- HAlign/VAlign + margins when dragged.
 	local panel = x_dialog:new({
 		Id = PANEL_ID,
 		ZOrder = 9900,
 		IdNode = true,
-		Dock = "box",
 		HAlign = "right",
 		VAlign = "top",
 		Margins = box(0, 460, 18, 0),
@@ -466,7 +468,7 @@ function UI.Show()
 	-- Negative margins equal to the panel's padding (16,6,16,14) so the frost +
 	-- frame fill the ENTIRE panel rect, not just the padded content area --
 	-- otherwise the panel's dark Background shows as a border around the frost.
-	local fill_margins = box(-16, -6, -16, -14)
+	local fill_margins = box(-20, -10, -20, -18)
 	local x_blur = rawget(_G, "XBlurRect")
 	if x_blur then
 		x_blur:new({
@@ -498,13 +500,20 @@ function UI.Show()
 	-- group filling the rest = the stretched angled banner (rollover_title_right,
 	-- XImage stretch-x) + a bright underline. Both images ~half transparent
 	-- (Transparency 128) so the frost shows through, exactly as the infopanel.
+	-- The title bar doubles as the drag handle: XMoveControl moves its IdNode
+	-- ancestor (the panel) when dragged. ChildrenHandleMouse=false so the banner
+	-- art/labels don't intercept the drag. Falls back to a static XWindow if
+	-- XMoveControl is unavailable.
 	local x_image = rawget(_G, "XImage")
-	local title_row = x_window:new({
+	local x_move = rawget(_G, "XMoveControl")
+	local title_row = (x_move or x_window):new({
 		Id = "MW_TitleRow",
 		HAlign = "stretch",
 		MinHeight = TITLE_HEIGHT,
 		MaxHeight = TITLE_HEIGHT,
-		Margins = box(-16, -6, -16, 2),
+		Margins = box(-20, -10, -20, 2),
+		HandleMouse = true,
+		ChildrenHandleMouse = false,
 	}, panel)
 
 	-- Left group: cap + accent bar + title (docked left, content-sized).
