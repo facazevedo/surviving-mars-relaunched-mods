@@ -414,7 +414,7 @@ function UI.Show()
 		HAlign = "right",
 		VAlign = "top",
 		Margins = box(0, 460, 18, 0),
-		Padding = box(10, 0, 10, 10),
+		Padding = box(16, 6, 16, 14),
 		MinWidth = PANEL_WIDTH,
 		MaxWidth = PANEL_WIDTH,
 		LayoutMethod = "VList",
@@ -424,6 +424,21 @@ function UI.Show()
 		HandleMouse = true,
 		ChildrenHandleMouse = true,
 	}, parent)
+
+	-- Native infopanel frame: the game's own 9-slice background texture stretched
+	-- to fill the panel, drawn behind all content (created first => lowest draw
+	-- order; Dock "box" fills + keeps it out of the VList flow). If the texture is
+	-- missing the flat PANEL_BACKGROUND colour still shows underneath.
+	local x_image = rawget(_G, "XImage")
+	if x_image then
+		x_image:new({
+			Id = "MartianWatersFrame",
+			Dock = "box",
+			Image = "UI/InfopanelRemaster/ip_background.png",
+			FrameBox = box(12, 12, 12, 12),
+			HandleMouse = false,
+		}, panel)
+	end
 
 	-- Header band: accent-coloured title bar that spans the panel width.
 	x_label:new({
