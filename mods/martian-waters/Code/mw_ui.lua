@@ -459,11 +459,16 @@ function UI.Show()
 	--      solid fill, so it tints rather than blocks.
 	-- Both are created before any content so they sit behind it. Each is guarded;
 	-- the flat PANEL_BACKGROUND remains as a fallback if a class/texture is absent.
+	-- Negative margins equal to the panel's padding (16,6,16,14) so the frost +
+	-- frame fill the ENTIRE panel rect, not just the padded content area --
+	-- otherwise the panel's dark Background shows as a border around the frost.
+	local fill_margins = box(-16, -6, -16, -14)
 	local x_blur = rawget(_G, "XBlurRect")
 	if x_blur then
 		x_blur:new({
 			Id = "MartianWatersBlur",
 			Dock = "box",
+			Margins = fill_margins,
 			BlurRadius = 18,
 			Mask = "UI/InfopanelRemaster/ip_background.png",
 			FrameLeft = 12, FrameTop = 12, FrameRight = 12, FrameBottom = 12,
@@ -475,6 +480,7 @@ function UI.Show()
 		x_frame:new({
 			Id = "MartianWatersFrame",
 			Dock = "box",
+			Margins = fill_margins,
 			Image = "UI/InfopanelRemaster/ip_background.png",
 			FrameBox = box(12, 12, 12, 12),
 			Transparency = 102,
