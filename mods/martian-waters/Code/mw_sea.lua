@@ -1,4 +1,4 @@
--- Rivers -- whole-map sea generation.
+-- MartianWaters -- whole-map sea generation.
 --
 -- A "sea" is the engine's own definition: every tile of the map below a global
 -- water level, flooded as one connected body (this mirrors the vanilla MapGen
@@ -8,27 +8,27 @@
 -- point, its level set to (map_min_height + sea_level_m), applied map-wide with
 -- spill-avoidance OFF so the engine floods the whole basin instead of clamping.
 --
--- The sea is registered as a Rivers.State segment with is_sea=true so ClearAll
+-- The sea is registered as a MartianWaters.State segment with is_sea=true so ClearAll
 -- and the UI treat it like any body of water, BUT the budget ticker skips it
--- (r_budget.lua) -- a sea is a static, engine-managed body, not a per-tick
+-- (mw_budget.lua) -- a sea is a static, engine-managed body, not a per-tick
 -- volume simulation. Adjusting its level re-applies the marker map-wide.
 --
 -- Public API:
---   Rivers.Sea.Generate(level_m?)   -> segment_id | nil, err
---   Rivers.Sea.SetLevel(seg_id, m)  -> level_m | nil, err   (used by the height field)
+--   MartianWaters.Sea.Generate(level_m?)   -> segment_id | nil, err
+--   MartianWaters.Sea.SetLevel(seg_id, m)  -> level_m | nil, err   (used by the height field)
 
-local Rivers = rawget(_G, "Rivers")
-if type(Rivers) ~= "table" then
+local MartianWaters = rawget(_G, "MartianWaters")
+if type(MartianWaters) ~= "table" then
 	return
 end
 
-local DebugLog = Rivers.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
+local DebugLog = MartianWaters.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
 local SCOPE = "Sea"
 
 local Sea = {}
 
 local function config()
-	return Rivers.Config or {}
+	return MartianWaters.Config or {}
 end
 
 local function current_map()
@@ -103,7 +103,7 @@ end
 
 -- Find the existing sea segment (there is at most one). Returns seg_id, seg.
 function Sea.Find()
-	for id, seg in pairs(Rivers.State.segments) do
+	for id, seg in pairs(MartianWaters.State.segments) do
 		if seg.is_sea then
 			return id, seg
 		end
@@ -121,8 +121,8 @@ local function absorb_touching_lakes(map, sea_z_wu, sea_id)
 	if type(terrain_table) ~= "table" or type(terrain_table.GetHeight) ~= "function" then
 		return 0
 	end
-	local Water = Rivers.Water
-	local segments = Rivers.State.segments
+	local Water = MartianWaters.Water
+	local segments = MartianWaters.State.segments
 	local absorbed = 0
 	for id, seg in pairs(segments) do
 		if not seg.is_sea then
@@ -132,10 +132,10 @@ local function absorb_touching_lakes(map, sea_z_wu, sea_id)
 					Water.RemoveMarker(map, seg.water_obj, seg.bbox)
 				end
 				segments[id] = nil
-				if Rivers.State.current_marker_segment == id then
+				if MartianWaters.State.current_marker_segment == id then
 					local sea_seg = sea_id and segments[sea_id] or nil
-					Rivers.State.current_marker = sea_seg and sea_seg.water_obj or false
-					Rivers.State.current_marker_segment = sea_id or false
+					MartianWaters.State.current_marker = sea_seg and sea_seg.water_obj or false
+					MartianWaters.State.current_marker_segment = sea_id or false
 				end
 				absorbed = absorbed + 1
 			end
@@ -150,15 +150,15 @@ end
 function Sea.Generate(level_m)
 	if config().ENABLE_MOD ~= true then
 		DebugLog.Warn(SCOPE, "Generate called but ENABLE_MOD is false")
-		return nil, "Rivers mod disabled in config"
+		return nil, "MartianWaters mod disabled in config"
 	end
 	local map = current_map()
 	if not map then
 		return nil, "no current map (start or load a game first)"
 	end
-	local Water = Rivers.Water
+	local Water = MartianWaters.Water
 	if not Water or type(Water.PlaceMarker) ~= "function" then
-		return nil, "Rivers.Water module not loaded"
+		return nil, "MartianWaters.Water module not loaded"
 	end
 	-- Only one sea at a time. Lakes are allowed to exist -- any the sea reaches
 	-- get absorbed below (merge-on-contact), so we don't block on them.
@@ -203,7 +203,7 @@ function Sea.Generate(level_m)
 
 	local flooded_wu2, volume_m3 = estimate_sea(samples, cell_wu2, water_z_wu)
 
-	local id = Rivers.State:RegisterSegment({
+	local id = MartianWaters.State:RegisterSegment({
 		is_sea = true,
 		water_obj = obj,
 		bbox = full_bbox,
@@ -223,9 +223,9 @@ function Sea.Generate(level_m)
 		surface_area_wu2 = flooded_wu2,
 	})
 	-- Make the sea the current source so the height field (and its +/-) act on
-	-- it. These are the same State fields r_tool.lua's set_current writes.
-	Rivers.State.current_marker = obj
-	Rivers.State.current_marker_segment = id
+	-- it. These are the same State fields mw_tool.lua's set_current writes.
+	MartianWaters.State.current_marker = obj
+	MartianWaters.State.current_marker_segment = id
 
 	-- Any lake the freshly-placed sea now covers becomes part of the sea.
 	absorb_touching_lakes(map, water_z_wu, id)
@@ -244,7 +244,7 @@ end
 -- ----------------------------------------------------------------------------
 
 function Sea.SetLevel(seg_id, level_m)
-	local seg = Rivers.State.segments[seg_id]
+	local seg = MartianWaters.State.segments[seg_id]
 	if not seg then
 		return nil, "no such segment: " .. tostring(seg_id)
 	end
@@ -255,9 +255,9 @@ function Sea.SetLevel(seg_id, level_m)
 	if not map then
 		return nil, "no current map"
 	end
-	local Water = Rivers.Water
+	local Water = MartianWaters.Water
 	if not Water or type(Water.SetMarkerLevel) ~= "function" then
-		return nil, "Rivers.Water module not loaded"
+		return nil, "MartianWaters.Water module not loaded"
 	end
 	if not seg.water_obj or not IsValid(seg.water_obj) then
 		return nil, "sea marker is gone"
@@ -312,4 +312,4 @@ function Sea.AdjustLevel(delta_m)
 	return Sea.SetLevel(id, (seg.actual_level_m or 0) + (tonumber(delta_m) or 0))
 end
 
-Rivers.Sea = Sea
+MartianWaters.Sea = Sea

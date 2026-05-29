@@ -1,14 +1,14 @@
--- Rivers -- per-source water budget + game-time ticker.
+-- MartianWaters -- per-source water budget + game-time ticker.
 --
 -- This module is what makes "+/- adjusts source discharge" work: the player
 -- changes a source's discharge (m^3/s) and a periodic ticker accumulates the
--- corresponding volume, recomputes the connected flooded area via r_flood.lua,
+-- corresponding volume, recomputes the connected flooded area via mw_flood.lua,
 -- derives an actual_level from volume + bowl geometry, and pushes that level
 -- to the engine water marker. No more direct level control.
 --
 -- One ticker drives all segments. It's a CreateGameTimeThread so it pauses
 -- with the game and survives save/load via the engine's standard thread
--- recreation. r_lifecycle.lua starts the ticker on Enable and on
+-- recreation. mw_lifecycle.lua starts the ticker on Enable and on
 -- OnMsg.NewMapLoaded, and kills it on Disable / DoneMap.
 --
 -- Volume-to-level model (intentionally cheap, NOT a real fluid solver):
@@ -20,25 +20,25 @@
 -- the new level.
 --
 -- Public API:
---   Rivers.Budget.AdjustDischarge(seg_id, delta_m3s)  -> new_discharge | nil, err
---   Rivers.Budget.SetDischarge(seg_id, value_m3s)     -> new_discharge | nil, err
---   Rivers.Budget.Tick(map, dt_s)                     -- step every segment once
---   Rivers.Budget.StartTicker()                       -- spawn the game-time loop
---   Rivers.Budget.StopTicker()                        -- kill it
---   Rivers.Budget.Get(seg_id)                         -> snapshot table for console
+--   MartianWaters.Budget.AdjustDischarge(seg_id, delta_m3s)  -> new_discharge | nil, err
+--   MartianWaters.Budget.SetDischarge(seg_id, value_m3s)     -> new_discharge | nil, err
+--   MartianWaters.Budget.Tick(map, dt_s)                     -- step every segment once
+--   MartianWaters.Budget.StartTicker()                       -- spawn the game-time loop
+--   MartianWaters.Budget.StopTicker()                        -- kill it
+--   MartianWaters.Budget.Get(seg_id)                         -> snapshot table for console
 
-local Rivers = rawget(_G, "Rivers")
-if type(Rivers) ~= "table" then
+local MartianWaters = rawget(_G, "MartianWaters")
+if type(MartianWaters) ~= "table" then
 	return
 end
 
-local DebugLog = Rivers.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
+local DebugLog = MartianWaters.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
 local SCOPE = "Budget"
 
 local Budget = {}
 
 local function config()
-	return Rivers.Config or {}
+	return MartianWaters.Config or {}
 end
 
 local function current_map()
@@ -107,7 +107,7 @@ end
 -- the shared logic so each public Set*/Adjust* is a one-line wrapper naming the
 -- segment field it owns.
 local function set_rate(seg_id, field, value_m3s, label)
-	local seg = Rivers.State.segments[seg_id]
+	local seg = MartianWaters.State.segments[seg_id]
 	if not seg then
 		return nil, "no such segment: " .. tostring(seg_id)
 	end
@@ -121,7 +121,7 @@ local function set_rate(seg_id, field, value_m3s, label)
 end
 
 local function adjust_rate(seg_id, field, delta_m3s, set_fn)
-	local seg = Rivers.State.segments[seg_id]
+	local seg = MartianWaters.State.segments[seg_id]
 	if not seg then
 		return nil, "no such segment: " .. tostring(seg_id)
 	end
@@ -141,7 +141,7 @@ function Budget.SetInfiltration(seg_id, v) return set_rate(seg_id, "infiltration
 function Budget.AdjustInfiltration(seg_id, d) return adjust_rate(seg_id, "infiltration_m3s", d, Budget.SetInfiltration) end
 
 function Budget.Get(seg_id)
-	local seg = Rivers.State.segments[seg_id]
+	local seg = MartianWaters.State.segments[seg_id]
 	if not seg then return nil end
 	return {
 		discharge_m3s = seg.discharge_m3s or 0,
@@ -165,16 +165,16 @@ end
 -- regular tick continue from there. Pushes the new level to the engine marker
 -- and re-runs the flood-fill so the visual snaps in the same frame.
 function Budget.SetLevel(seg_id, level_m)
-	local seg = Rivers.State.segments[seg_id]
+	local seg = MartianWaters.State.segments[seg_id]
 	if not seg then
 		return nil, "no such segment: " .. tostring(seg_id)
 	end
-	-- A sea isn't volume-driven; its level is applied map-wide by r_sea.lua.
+	-- A sea isn't volume-driven; its level is applied map-wide by mw_sea.lua.
 	if seg.is_sea then
-		if Rivers.Sea and type(Rivers.Sea.SetLevel) == "function" then
-			return Rivers.Sea.SetLevel(seg_id, level_m)
+		if MartianWaters.Sea and type(MartianWaters.Sea.SetLevel) == "function" then
+			return MartianWaters.Sea.SetLevel(seg_id, level_m)
 		end
-		return nil, "Rivers.Sea module not loaded"
+		return nil, "MartianWaters.Sea module not loaded"
 	end
 	local v = tonumber(level_m) or 0
 	if v < 0 then v = 0 end
@@ -186,10 +186,10 @@ function Budget.SetLevel(seg_id, level_m)
 	seg.actual_level_m = v
 
 	local map = current_map()
-	if Rivers.Flood and type(Rivers.Flood.RecomputeSegment) == "function" then
-		Rivers.Flood.RecomputeSegment(map, seg)
+	if MartianWaters.Flood and type(MartianWaters.Flood.RecomputeSegment) == "function" then
+		MartianWaters.Flood.RecomputeSegment(map, seg)
 	end
-	local Water = Rivers.Water
+	local Water = MartianWaters.Water
 	if Water and type(Water.SetMarkerLevel) == "function" and seg.water_obj then
 		local new_water_z = (seg.floor_wu or 0) + meters_to_wu(v)
 		-- A direct SetLevel snaps exactly to the requested level, and resets the
@@ -209,7 +209,7 @@ function Budget.SetLevel(seg_id, level_m)
 end
 
 function Budget.AdjustLevel(seg_id, delta_m)
-	local seg = Rivers.State.segments[seg_id]
+	local seg = MartianWaters.State.segments[seg_id]
 	if not seg then
 		return nil, "no such segment: " .. tostring(seg_id)
 	end
@@ -248,10 +248,10 @@ local function update_segment_volume(seg, dt_s, cfg)
 	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
 		return false
 	end
-	-- Seas are static, engine-managed bodies (r_sea.lua); the per-tick volume
+	-- Seas are static, engine-managed bodies (mw_sea.lua); the per-tick volume
 	-- simulation + map-wide flood-fill would be both wrong and expensive for
 	-- them, so they never tick. Their level only changes on explicit player
-	-- action via Rivers.Sea.SetLevel.
+	-- action via MartianWaters.Sea.SetLevel.
 	if seg.is_sea then
 		return false
 	end
@@ -302,10 +302,10 @@ end
 -- current level so the gate measures the next drift from here.
 local function apply_segment(map, seg)
 	seg.applied_level_m = seg.actual_level_m or 0
-	if Rivers.Flood and type(Rivers.Flood.RecomputeSegment) == "function" then
-		Rivers.Flood.RecomputeSegment(map, seg)
+	if MartianWaters.Flood and type(MartianWaters.Flood.RecomputeSegment) == "function" then
+		MartianWaters.Flood.RecomputeSegment(map, seg)
 	end
-	local Water = Rivers.Water
+	local Water = MartianWaters.Water
 	if Water and type(Water.SetMarkerLevel) == "function" then
 		local new_water_z = (seg.floor_wu or 0) + meters_to_wu(seg.actual_level_m or 0)
 		Water.SetMarkerLevel(map, seg.water_obj, new_water_z)
@@ -326,14 +326,14 @@ function Budget.Tick(map, dt_s)
 	if not map then return end
 	local cfg = config()
 
-	local queue = Rivers.State.rebuild_queue
+	local queue = MartianWaters.State.rebuild_queue
 	if type(queue) ~= "table" then
 		queue = {}
-		Rivers.State.rebuild_queue = queue
+		MartianWaters.State.rebuild_queue = queue
 	end
 
 	-- Phase 1: cheap integration + enqueue newly-due segments (no duplicates).
-	for id, seg in pairs(Rivers.State.segments) do
+	for id, seg in pairs(MartianWaters.State.segments) do
 		if update_segment_volume(seg, dt_s, cfg) and not seg.rebuild_queued then
 			seg.rebuild_queued = true
 			queue[#queue + 1] = id
@@ -346,7 +346,7 @@ function Budget.Tick(map, dt_s)
 	local processed = 0
 	while processed < cap and #queue > 0 do
 		local id = table.remove(queue, 1)
-		local seg = Rivers.State.segments[id]
+		local seg = MartianWaters.State.segments[id]
 		if seg then
 			seg.rebuild_queued = false
 			-- Re-check: the segment may have been levelled (instant SetLevel) or
@@ -362,8 +362,8 @@ function Budget.Tick(map, dt_s)
 	-- The status label + the live input fields need a Refresh to reflect the
 	-- new volume/level/discharge values. Refresh is cheap and gated on
 	-- is_window_alive, so calling it every tick is safe even with no panel.
-	if Rivers.UI and type(Rivers.UI.Refresh) == "function" then
-		Rivers.UI.Refresh()
+	if MartianWaters.UI and type(MartianWaters.UI.Refresh) == "function" then
+		MartianWaters.UI.Refresh()
 	end
 end
 
@@ -388,32 +388,32 @@ local function ticker_loop()
 end
 
 function Budget.StartTicker()
-	if Rivers.State.budget_thread and IsValidThread(Rivers.State.budget_thread) then
-		return Rivers.State.budget_thread
+	if MartianWaters.State.budget_thread and IsValidThread(MartianWaters.State.budget_thread) then
+		return MartianWaters.State.budget_thread
 	end
 	local create = rawget(_G, "CreateGameTimeThread")
 	if type(create) ~= "function" then
 		DebugLog.Warn(SCOPE, "CreateGameTimeThread unavailable; ticker will not start")
 		return nil
 	end
-	Rivers.State.budget_thread = create(ticker_loop)
+	MartianWaters.State.budget_thread = create(ticker_loop)
 	DebugLog.Info(SCOPE, "ticker started", {
 		period_ms = (config().HYDRO_TICK_INTERVAL_MS or 1000),
 	})
-	return Rivers.State.budget_thread
+	return MartianWaters.State.budget_thread
 end
 
 function Budget.StopTicker()
-	local thread = Rivers.State.budget_thread
+	local thread = MartianWaters.State.budget_thread
 	-- Drop the rebuild queue so ids from this map/session don't linger into the
 	-- next one (they'd be skipped as stale, but clearing keeps it tidy).
-	Rivers.State.rebuild_queue = {}
+	MartianWaters.State.rebuild_queue = {}
 	if not thread then return end
 	if type(rawget(_G, "DeleteThread")) == "function" and IsValidThread(thread) then
 		DeleteThread(thread)
 	end
-	Rivers.State.budget_thread = false
+	MartianWaters.State.budget_thread = false
 	DebugLog.Info(SCOPE, "ticker stopped")
 end
 
-Rivers.Budget = Budget
+MartianWaters.Budget = Budget

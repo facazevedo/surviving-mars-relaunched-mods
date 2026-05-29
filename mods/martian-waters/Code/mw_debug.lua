@@ -1,20 +1,20 @@
--- Rivers -- centralized debug logging.
+-- MartianWaters -- centralized debug logging.
 --
--- DebugLog.Info/Warn/Error(scope, message, data) print "[Rivers] <scope>:
--- <message> {k=v, ...}" only when Rivers.Config.DEBUG_LOGS is exactly true
+-- DebugLog.Info/Warn/Error(scope, message, data) print "[MartianWaters] <scope>:
+-- <message> {k=v, ...}" only when MartianWaters.Config.DEBUG_LOGS is exactly true
 -- (and the optional scoped flag DEBUG_<SCOPE> is not explicitly false). Config
 -- is read lazily on each call so log gating always reflects the live config.
 
-local Rivers = rawget(_G, "Rivers")
-if type(Rivers) ~= "table" then
-	Rivers = {}
-	rawset(_G, "Rivers", Rivers)
+local MartianWaters = rawget(_G, "MartianWaters")
+if type(MartianWaters) ~= "table" then
+	MartianWaters = {}
+	rawset(_G, "MartianWaters", MartianWaters)
 end
 
-local PREFIX = "[Rivers] "
+local PREFIX = "[MartianWaters] "
 
 local function current_config()
-	return Rivers.Config or {}
+	return MartianWaters.Config or {}
 end
 
 local function enabled(scope)
@@ -77,4 +77,4 @@ function DebugLog.Error(scope, message, data)
 	emit("ERROR ", scope, message, data)
 end
 
-Rivers.DebugLog = DebugLog
+MartianWaters.DebugLog = DebugLog

@@ -1,4 +1,4 @@
--- Rivers -- water-tool mode and click handling.
+-- MartianWaters -- water-tool mode and click handling.
 --
 -- The tool lives entirely in this module: the UI calls Tool.Activate() /
 -- Tool.Deactivate() / Tool.AdjustLevel(delta_meters). When active, an
@@ -7,32 +7,32 @@
 -- inactive, the overlay is destroyed so normal game input is untouched.
 --
 -- "Most recently placed" rule: each placement (or click-within-radius select)
--- sets Rivers.State.current_marker. The +/- buttons in the UI act on that
+-- sets MartianWaters.State.current_marker. The +/- buttons in the UI act on that
 -- marker by calling Water.SetMarkerLevel with (ground + level_meters * guim).
 --
--- Public API (used by r_ui.lua):
---   Rivers.Tool.IsActive()        -> bool
---   Rivers.Tool.Activate()        -> bool, err
---   Rivers.Tool.Deactivate()
---   Rivers.Tool.Toggle()
---   Rivers.Tool.AdjustLevel(d_m)  -> new_level_m or nil, err
---   Rivers.Tool.GetCurrentLevel() -> meters_above_ground or nil
---   Rivers.Tool.PlaceAtCursor()   -> segment_id or nil, err  (used by tests)
+-- Public API (used by mw_ui.lua):
+--   MartianWaters.Tool.IsActive()        -> bool
+--   MartianWaters.Tool.Activate()        -> bool, err
+--   MartianWaters.Tool.Deactivate()
+--   MartianWaters.Tool.Toggle()
+--   MartianWaters.Tool.AdjustLevel(d_m)  -> new_level_m or nil, err
+--   MartianWaters.Tool.GetCurrentLevel() -> meters_above_ground or nil
+--   MartianWaters.Tool.PlaceAtCursor()   -> segment_id or nil, err  (used by tests)
 
-local Rivers = rawget(_G, "Rivers")
-if type(Rivers) ~= "table" then
+local MartianWaters = rawget(_G, "MartianWaters")
+if type(MartianWaters) ~= "table" then
 	return
 end
 
-local DebugLog = Rivers.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
+local DebugLog = MartianWaters.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
 local SCOPE = "Tool"
 
 local Tool = {}
 
-local OVERLAY_ID = "RiversWaterToolOverlay"
+local OVERLAY_ID = "MartianWatersWaterToolOverlay"
 
 local function config()
-	return Rivers.Config or {}
+	return MartianWaters.Config or {}
 end
 
 local function meters_to_wu(m)
@@ -60,13 +60,13 @@ end
 -- ----------------------------------------------------------------------------
 
 local function set_current(seg_id, obj)
-	Rivers.State.current_marker = obj or false
-	Rivers.State.current_marker_segment = seg_id or false
+	MartianWaters.State.current_marker = obj or false
+	MartianWaters.State.current_marker_segment = seg_id or false
 end
 
 local function clear_current()
-	Rivers.State.current_marker = false
-	Rivers.State.current_marker_segment = false
+	MartianWaters.State.current_marker = false
+	MartianWaters.State.current_marker_segment = false
 end
 
 local function find_nearby_segment(map, click_pt, radius_wu)
@@ -74,7 +74,7 @@ local function find_nearby_segment(map, click_pt, radius_wu)
 		return nil
 	end
 	local best_id, best_seg, best_dist2
-	for id, seg in pairs(Rivers.State.segments) do
+	for id, seg in pairs(MartianWaters.State.segments) do
 		if seg.water_obj and IsValid(seg.water_obj) then
 			local dx = seg.marker_x - click_pt:x()
 			local dy = seg.marker_y - click_pt:y()
@@ -91,7 +91,7 @@ end
 -- Placement
 -- ----------------------------------------------------------------------------
 
--- Used by the overlay's OnMouseButtonDown and by Rivers.Tool.PlaceAtCursor.
+-- Used by the overlay's OnMouseButtonDown and by MartianWaters.Tool.PlaceAtCursor.
 -- click_pt is a point() in world units. Returns segment_id or (nil, err).
 local function place_or_select_at(click_pt)
 	local map = current_map()
@@ -114,8 +114,8 @@ local function place_or_select_at(click_pt)
 	-- Don't stack a new body on a tile that already has water (the sea, or
 	-- another lake): water bodies must not overlap. We read the live water grid
 	-- via the depth sampler -- anything wetter than "dry" here is rejected.
-	if Rivers.Depth and type(Rivers.Depth.SampleAt) == "function" then
-		local depth_m = Rivers.Depth.SampleAt(map, click_pt)
+	if MartianWaters.Depth and type(MartianWaters.Depth.SampleAt) == "function" then
+		local depth_m = MartianWaters.Depth.SampleAt(map, click_pt)
 		if type(depth_m) == "number" and depth_m > 0 then
 			DebugLog.Info(SCOPE, "placement blocked: already underwater", {
 				x = click_pt:x(), y = click_pt:y(), depth_m = depth_m,
@@ -127,9 +127,9 @@ local function place_or_select_at(click_pt)
 	-- New marker: drop one at the click point. Use a single-point "path" so the
 	-- existing API/state-tracking path keeps working. The carve module is NOT
 	-- invoked here; we only place a TerrainWaterObject.
-	local Water = Rivers.Water
+	local Water = MartianWaters.Water
 	if not Water then
-		return nil, "Rivers.Water module not loaded"
+		return nil, "MartianWaters.Water module not loaded"
 	end
 
 	local ground_wu = terrain.GetHeight(map, click_pt)
@@ -153,7 +153,7 @@ local function place_or_select_at(click_pt)
 	local bowl_area_wu2 = (2 * radius_wu) * (2 * radius_wu)
 	local bowl_area_m2 = bowl_area_wu2 / (guim * guim)
 	local initial_volume_m3 = bowl_area_m2 * start_level_m
-	local id = Rivers.State:RegisterSegment({
+	local id = MartianWaters.State:RegisterSegment({
 		water_obj = obj,
 		bbox = bbox,
 		floor_wu = floor_wu,
@@ -200,9 +200,9 @@ end
 -- Read a numeric field off the current segment, or nil if there's no current
 -- marker. Used by the UI to populate the live input fields + readouts.
 local function get_current_field(field)
-	local seg_id = Rivers.State.current_marker_segment
+	local seg_id = MartianWaters.State.current_marker_segment
 	if not seg_id then return nil end
-	local seg = Rivers.State.segments[seg_id]
+	local seg = MartianWaters.State.segments[seg_id]
 	if not seg then return nil end
 	return seg[field] or 0
 end
@@ -216,47 +216,47 @@ function Tool.GetCurrentVolume() return get_current_field("volume_m3") end
 function Tool.GetCurrentFloodedAreaWu2() return get_current_field("flooded_area_wu2") end
 
 function Tool.GetCurrentDepthClass()
-	local seg_id = Rivers.State.current_marker_segment
+	local seg_id = MartianWaters.State.current_marker_segment
 	if not seg_id then return nil end
-	local seg = Rivers.State.segments[seg_id]
-	if not seg or not Rivers.Depth then return nil end
-	return Rivers.Depth.Classify(seg.actual_level_m or 0)
+	local seg = MartianWaters.State.segments[seg_id]
+	if not seg or not MartianWaters.Depth then return nil end
+	return MartianWaters.Depth.Classify(seg.actual_level_m or 0)
 end
 
 -- Route a Budget setter/adjuster to the current segment. All the field controls
 -- (inflow/drainage/evaporation/infiltration discharge rates AND the instant
 -- height level) share this: validate there's a live marker, then call the named
--- Rivers.Budget function with (seg_id, value). The budget ticker drives the
+-- MartianWaters.Budget function with (seg_id, value). The budget ticker drives the
 -- actual water level from the rates; SetLevel/AdjustLevel snap it instantly.
 local function route(budget_fn_name, value)
-	local seg_id = Rivers.State.current_marker_segment
+	local seg_id = MartianWaters.State.current_marker_segment
 	if not seg_id then
 		return nil, "no current marker (click a hole first)"
 	end
-	local seg = Rivers.State.segments[seg_id]
+	local seg = MartianWaters.State.segments[seg_id]
 	if not seg or not seg.water_obj or not IsValid(seg.water_obj) then
 		clear_current()
 		return nil, "current marker is gone"
 	end
-	local fn = Rivers.Budget and Rivers.Budget[budget_fn_name]
+	local fn = MartianWaters.Budget and MartianWaters.Budget[budget_fn_name]
 	if type(fn) ~= "function" then
-		return nil, "Rivers.Budget module not loaded"
+		return nil, "MartianWaters.Budget module not loaded"
 	end
 	return fn(seg_id, value or 0)
 end
 
 -- Sea-level controls operate on "the sea" (not the current marker), so they go
--- straight to Rivers.Sea rather than through route(). No-op if no sea exists.
+-- straight to MartianWaters.Sea rather than through route(). No-op if no sea exists.
 function Tool.GetSeaLevel()
-	return Rivers.Sea and Rivers.Sea.GetLevel and Rivers.Sea.GetLevel() or nil
+	return MartianWaters.Sea and MartianWaters.Sea.GetLevel and MartianWaters.Sea.GetLevel() or nil
 end
 function Tool.SetSeaLevel(v)
-	if not (Rivers.Sea and Rivers.Sea.SetCurrentLevel) then return nil, "Rivers.Sea not loaded" end
-	return Rivers.Sea.SetCurrentLevel(v)
+	if not (MartianWaters.Sea and MartianWaters.Sea.SetCurrentLevel) then return nil, "MartianWaters.Sea not loaded" end
+	return MartianWaters.Sea.SetCurrentLevel(v)
 end
 function Tool.AdjustSeaLevel(d)
-	if not (Rivers.Sea and Rivers.Sea.AdjustLevel) then return nil, "Rivers.Sea not loaded" end
-	return Rivers.Sea.AdjustLevel(d)
+	if not (MartianWaters.Sea and MartianWaters.Sea.AdjustLevel) then return nil, "MartianWaters.Sea not loaded" end
+	return MartianWaters.Sea.AdjustLevel(d)
 end
 
 function Tool.SetDischarge(v) return route("SetDischarge", v) end
@@ -290,7 +290,7 @@ local function get_overlay_parent()
 end
 
 local function destroy_overlay()
-	local overlay = Rivers.State.tool_overlay
+	local overlay = MartianWaters.State.tool_overlay
 	if overlay and is_window_alive(overlay) then
 		pcall(function()
 			if overlay.delete then overlay:delete()
@@ -298,7 +298,7 @@ local function destroy_overlay()
 			end
 		end)
 	end
-	Rivers.State.tool_overlay = false
+	MartianWaters.State.tool_overlay = false
 end
 
 local function create_overlay()
@@ -311,7 +311,7 @@ local function create_overlay()
 	if not x_window then
 		return false, "XWindow class unavailable"
 	end
-	-- The overlay covers the screen but is BELOW the Rivers panel (which uses a
+	-- The overlay covers the screen but is BELOW the MartianWaters panel (which uses a
 	-- higher ZOrder). Clicks on the panel itself are consumed by the panel and
 	-- never reach the overlay. Clicks anywhere else fall to the overlay, which
 	-- reads the terrain cursor and drops/selects a marker there.
@@ -350,7 +350,7 @@ local function create_overlay()
 	if type(overlay.SetFocus) == "function" then
 		pcall(function() overlay:SetFocus(true) end)
 	end
-	Rivers.State.tool_overlay = overlay
+	MartianWaters.State.tool_overlay = overlay
 	return overlay
 end
 
@@ -359,12 +359,12 @@ end
 -- ----------------------------------------------------------------------------
 
 function Tool.IsActive()
-	return Rivers.State.tool_active == true
+	return MartianWaters.State.tool_active == true
 end
 
 function Tool.Activate()
 	if config().ENABLE_MOD ~= true then
-		return false, "Rivers mod disabled in config"
+		return false, "MartianWaters mod disabled in config"
 	end
 	if not current_map() then
 		return false, "no current map (start or load a game first)"
@@ -376,10 +376,10 @@ function Tool.Activate()
 	if not overlay then
 		return false, err
 	end
-	Rivers.State.tool_active = true
+	MartianWaters.State.tool_active = true
 	DebugLog.Info(SCOPE, "activated")
-	if Rivers.UI and type(Rivers.UI.Refresh) == "function" then
-		Rivers.UI.Refresh()
+	if MartianWaters.UI and type(MartianWaters.UI.Refresh) == "function" then
+		MartianWaters.UI.Refresh()
 	end
 	return true
 end
@@ -389,10 +389,10 @@ function Tool.Deactivate()
 		return
 	end
 	destroy_overlay()
-	Rivers.State.tool_active = false
+	MartianWaters.State.tool_active = false
 	DebugLog.Info(SCOPE, "deactivated")
-	if Rivers.UI and type(Rivers.UI.Refresh) == "function" then
-		Rivers.UI.Refresh()
+	if MartianWaters.UI and type(MartianWaters.UI.Refresh) == "function" then
+		MartianWaters.UI.Refresh()
 	end
 end
 
@@ -404,11 +404,11 @@ function Tool.Toggle()
 	end
 end
 
--- Called by r_lifecycle.lua on OnMsg.DoneMap to drop overlay + current marker.
+-- Called by mw_lifecycle.lua on OnMsg.DoneMap to drop overlay + current marker.
 function Tool.OnMapUnloaded()
 	destroy_overlay()
-	Rivers.State.tool_active = false
+	MartianWaters.State.tool_active = false
 	clear_current()
 end
 
-Rivers.Tool = Tool
+MartianWaters.Tool = Tool

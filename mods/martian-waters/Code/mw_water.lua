@@ -1,4 +1,4 @@
--- Rivers -- water marker placement and engine water-grid integration.
+-- MartianWaters -- water marker placement and engine water-grid integration.
 --
 -- The engine's TerrainWaterObject class is a marker that fills a depression
 -- around itself up to a configurable z-offset using terrain.UpdateWaterGridFromObject.
@@ -11,19 +11,19 @@
 -- water grid + planes only in the area we changed.
 --
 -- Public API:
---   Rivers.Water.PlaceMarker(map, center_pt, floor_wu, water_level_m, bbox) -> obj | nil, err
---   Rivers.Water.RemoveMarker(map, obj, bbox)
+--   MartianWaters.Water.PlaceMarker(map, center_pt, floor_wu, water_level_m, bbox) -> obj | nil, err
+--   MartianWaters.Water.RemoveMarker(map, obj, bbox)
 --
 -- Reversibility: deleting the marker and re-running ApplyAllWaterObjects on
 -- the bbox makes the engine drain the water. Terrain heights are NOT restored
--- by this module -- see r_terrain.lua for the prototype caveat.
+-- by this module -- see mw_terrain.lua for the prototype caveat.
 
-local Rivers = rawget(_G, "Rivers")
-if type(Rivers) ~= "table" then
+local MartianWaters = rawget(_G, "MartianWaters")
+if type(MartianWaters) ~= "table" then
 	return
 end
 
-local DebugLog = Rivers.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
+local DebugLog = MartianWaters.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
 
 local Water = {}
 local SCOPE = "Water"
@@ -50,7 +50,7 @@ end
 --
 -- avoid_spill (default true): when true the engine lowers z incrementally if the
 -- chosen level would flood the map, keeping a pool contained. A SEA wants the
--- opposite -- it should flood the whole connected basin -- so r_sea.lua passes
+-- opposite -- it should flood the whole connected basin -- so mw_sea.lua passes
 -- false. apply_box, when given, forces ApplyAllWaterObjects over that exact box
 -- (the sea passes the full map) instead of the engine's per-marker
 -- invalidation_box.
@@ -139,4 +139,4 @@ function Water.RemoveMarker(map, obj, bbox)
 	})
 end
 
-Rivers.Water = Water
+MartianWaters.Water = Water

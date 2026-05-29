@@ -1,13 +1,13 @@
--- Rivers -- rain controls.
+-- MartianWaters -- rain controls.
 --
--- Two independent rain modes, exposed as four buttons in r_ui.lua:
+-- Two independent rain modes, exposed as four buttons in mw_ui.lua:
 --
 --   Disaster:
 --     Rain.StartDisaster(preset_id) -- delegates to engine CheatRainsDisaster.
 --                                      Real gameplay disaster: soil changes,
 --                                      possibly toxic pools (Toxic_* presets),
 --                                      blocks terraforming while active.
---                                      `preset_id` defaults to Rivers.Config
+--                                      `preset_id` defaults to MartianWaters.Config
 --                                      DEFAULT_RAIN_PRESET ("Normal_Low").
 --     Rain.StopDisaster()           -- delegates to engine StopRainsDisaster.
 --                                      No-op if nothing is active.
@@ -31,12 +31,12 @@
 -- resets to off, which matches the player's expectation that a cosmetic toggle
 -- doesn't sneak past a save boundary.
 
-local Rivers = rawget(_G, "Rivers")
-if type(Rivers) ~= "table" then
+local MartianWaters = rawget(_G, "MartianWaters")
+if type(MartianWaters) ~= "table" then
 	return
 end
 
-local DebugLog = Rivers.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
+local DebugLog = MartianWaters.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
 local SCOPE = "Rain"
 
 -- Engine uses view = 1 for the main viewport (see Lightmodel.lua line 1691-1692
@@ -47,7 +47,7 @@ local VIEW = 1
 local Rain = {}
 
 local function config()
-	return Rivers.Config or {}
+	return MartianWaters.Config or {}
 end
 
 local function current_map()
@@ -107,7 +107,7 @@ end
 function Rain.StartDisaster(preset_id)
 	if config().ENABLE_MOD ~= true then
 		DebugLog.Warn(SCOPE, "StartDisaster: ENABLE_MOD is false")
-		return nil, "Rivers mod disabled in config"
+		return nil, "MartianWaters mod disabled in config"
 	end
 	if not current_map() then
 		return nil, "no current map (start or load a game first)"
@@ -149,18 +149,18 @@ end
 -- ----------------------------------------------------------------------------
 
 function Rain.IsVisualActive()
-	return Rivers.State.rain_visual_on == true
+	return MartianWaters.State.rain_visual_on == true
 end
 
 function Rain.StartVisual()
 	if config().ENABLE_MOD ~= true then
 		DebugLog.Warn(SCOPE, "StartVisual: ENABLE_MOD is false")
-		return nil, "Rivers mod disabled in config"
+		return nil, "MartianWaters mod disabled in config"
 	end
 	if not visual_api_available() then
 		return nil, "SetSceneParam unavailable"
 	end
-	Rivers.State.rain_visual_on = true
+	MartianWaters.State.rain_visual_on = true
 	SetSceneParam(VIEW, "RainEnable", 1, 0, 0)
 	DebugLog.Info(SCOPE, "visual rain on")
 	return true
@@ -170,21 +170,21 @@ function Rain.StopVisual()
 	if not visual_api_available() then
 		return nil, "SetSceneParam unavailable"
 	end
-	Rivers.State.rain_visual_on = false
+	MartianWaters.State.rain_visual_on = false
 	SetSceneParam(VIEW, "RainEnable", 0, 0, 0)
 	DebugLog.Info(SCOPE, "visual rain off")
 	return true
 end
 
--- Called from r_lifecycle.lua's OnMsg.LightmodelSetSceneParams. The engine's
+-- Called from mw_lifecycle.lua's OnMsg.LightmodelSetSceneParams. The engine's
 -- own handler in Lightmodel.lua runs first and writes RainEnable from the
 -- active lightmodel; ours runs after and reapplies our override iff the mod
 -- visual flag is set. When the flag is false, this is a no-op and the engine
 -- value stands -- that is the restore path.
 function Rain.OnLightmodelSetSceneParams(_map, view, _lm_buf, _time, start_offset)
-	if Rivers.State.rain_visual_on ~= true then return end
+	if MartianWaters.State.rain_visual_on ~= true then return end
 	if not visual_api_available() then return end
 	SetSceneParam(view or VIEW, "RainEnable", 1, 0, start_offset or 0)
 end
 
-Rivers.Rain = Rain
+MartianWaters.Rain = Rain

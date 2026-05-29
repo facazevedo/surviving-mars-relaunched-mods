@@ -1,4 +1,4 @@
-# Rivers
+# Martian Waters
 
 Player-driven river creation for Surviving Mars Relaunched. Carve a bowl-shaped depression along a path, then fill it with the engine's `TerrainWaterObject` water grid -- the terrain shapes the river.
 
@@ -12,7 +12,7 @@ The hydrology design deliberately rejects bbox-based gameplay: water effects are
 
 ### Water tool
 
-A right-side panel ("RIVERS") appears once a map is loaded.
+A right-side panel ("MARTIAN WATERS") appears once a map is loaded.
 
 * **Activate Water Mode** -- enters click-to-place mode. Left-click on terrain drops a `TerrainWaterObject` marker at the cursor, filling the surrounding depression. Click within `WATER_TOOL_SELECT_RADIUS_M` of an existing marker to select it instead of placing a new one. Escape exits the mode.
 * **`-` / `+`** -- adjust the water level of the most recently placed/selected marker. Step size is `WATER_TOOL_STEP_METERS` (default 1 m).
@@ -28,18 +28,18 @@ Two independent rain modes, both gated on `ENABLE_MOD`:
 ### Console API
 
 ```lua
-Rivers.Create(path, params)        -- carve + fill along a path of {x,y} points
-Rivers.Demo()                      -- build the configured demo river across the map
-Rivers.CreateAtCursor(opts)        -- short river through the terrain cursor
-Rivers.ClearAll()                  -- remove every placed marker
-Rivers.List()                      -- print active segment ids
-Rivers.Rain.StartDisaster(preset?) -- defaults to Config.DEFAULT_RAIN_PRESET
-Rivers.Rain.StopDisaster()
-Rivers.Rain.StartVisual()
-Rivers.Rain.StopVisual()
+MartianWaters.Create(path, params)        -- carve + fill along a path of {x,y} points
+MartianWaters.Demo()                      -- build the configured demo river across the map
+MartianWaters.CreateAtCursor(opts)        -- short river through the terrain cursor
+MartianWaters.ClearAll()                  -- remove every placed marker
+MartianWaters.List()                      -- print active segment ids
+MartianWaters.Rain.StartDisaster(preset?) -- defaults to Config.DEFAULT_RAIN_PRESET
+MartianWaters.Rain.StopDisaster()
+MartianWaters.Rain.StartVisual()
+MartianWaters.Rain.StopVisual()
 ```
 
-All public functions respect `Rivers.Config.ENABLE_MOD`.
+All public functions respect `MartianWaters.Config.ENABLE_MOD`.
 
 ---
 
@@ -212,7 +212,7 @@ Optional later features:
 
 ## Configuration
 
-All knobs live in `Code/r_config.lua`. The most user-relevant:
+All knobs live in `Code/mw_config.lua`. The most user-relevant:
 
 | Key | Default | Purpose |
 | --- | --- | --- |
@@ -238,21 +238,21 @@ mods/rivers/
   metadata.lua          ModDef + canonical mod version + Lua load order
   items.lua             ModItemCode entries (matches metadata.lua order)
   Code/
-    r_state.lua         Rivers.State table + RegisterSegment helper
-    r_config.lua        all configuration + typed Rivers.Config view
-    r_debug.lua         scoped logging helper
-    r_terrain.lua       SetHeightCircle bowl carve + path normalization
-    r_water.lua         TerrainWaterObject marker placement / level / removal
-    r_rain.lua          disaster + visual rain controls
-    r_api.lua           public Rivers.Create / Demo / CreateAtCursor / ClearAll / List
-    r_tool.lua          water-tool overlay + click-to-place/select + +/- adjust
-    r_ui.lua            right-side panel (water tool + rain section)
-    r_lifecycle.lua     Enable/Disable + OnMsg wiring (NewMapLoaded, DoneMap,
+    mw_state.lua         MartianWaters.State table + RegisterSegment helper
+    mw_config.lua        all configuration + typed MartianWaters.Config view
+    mw_debug.lua         scoped logging helper
+    mw_terrain.lua       SetHeightCircle bowl carve + path normalization
+    mw_water.lua         TerrainWaterObject marker placement / level / removal
+    mw_rain.lua          disaster + visual rain controls
+    mw_api.lua           public MartianWaters.Create / Demo / CreateAtCursor / ClearAll / List
+    mw_tool.lua          water-tool overlay + click-to-place/select + +/- adjust
+    mw_ui.lua            right-side panel (water tool + rain section)
+    mw_lifecycle.lua     Enable/Disable + OnMsg wiring (NewMapLoaded, DoneMap,
                         LightmodelSetSceneParams)
-    Rivers.lua          entry point: logs config + calls Lifecycle.Enable()
+    MartianWaters.lua          entry point: logs config + calls Lifecycle.Enable()
 ```
 
-The hydrology layer is expected to land as new modules (e.g. `r_hydrology.lua` for the depth/flood-spread model, `r_budget.lua` for the per-source water budget, `r_effects.lua` for movement/placement/damage application). Each new module must be added to **both** `metadata.lua` and `items.lua`.
+The hydrology layer is expected to land as new modules (e.g. `mw_hydrology.lua` for the depth/flood-spread model, `mw_budget.lua` for the per-source water budget, `mw_effects.lua` for movement/placement/damage application). Each new module must be added to **both** `metadata.lua` and `items.lua`.
 
 ---
 
@@ -289,7 +289,7 @@ The hydrology layer is expected to land as new modules (e.g. `r_hydrology.lua` f
 
 ## Known Limitations
 
-* **Terrain carving is not reversible.** The carved bowl stays after `Rivers.ClearAll()` or mod disable. Water markers are reversible (they drain), but the channel is baked into the heightfield. This mirrors how vanilla landscape buildings (e.g. `LandscapeLake`) work and would require a heightmap snapshot to undo.
+* **Terrain carving is not reversible.** The carved bowl stays after `MartianWaters.ClearAll()` or mod disable. Water markers are reversible (they drain), but the channel is baked into the heightfield. This mirrors how vanilla landscape buildings (e.g. `LandscapeLake`) work and would require a heightmap snapshot to undo.
 * **The hydrology layer is not yet implemented.** Depth sampling, connected flood spread, water budget, movement/placement/damage rules, and dome sealing are designed but not coded.
 * **Disaster rain is engine-owned game state** and is intentionally not cancelled on mod disable. The visual override is mod-owned and is cleared on disable.
 * **Not a fluid simulation.** The model is a discrete, terrain-aware, budget-driven approximation. It will not produce realistic flow vectors, waves, or pressure -- by design.

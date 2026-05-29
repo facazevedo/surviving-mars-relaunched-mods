@@ -1,8 +1,8 @@
--- Rivers -- right-side panel hosting the water tool and the rain buttons.
+-- MartianWaters -- right-side panel hosting the water tool and the rain buttons.
 --
 -- Layout:
 --   ┌────────────────────────────┐
---   │           RIVERS           │   <- title
+--   │           MARTIAN WATERS           │   <- title
 --   ├────────────────────────────┤
 --   │  [ Activate Water Mode ]   │   <- toggle (changes label when active)
 --   │  source depth: shallow     │   <- status: depth class at the source
@@ -24,24 +24,24 @@
 --   └────────────────────────────┘
 --
 -- Lifecycle:
---   Rivers.UI.Show()      -- (re)create the panel and attach to GetHUD()
---   Rivers.UI.Hide()      -- destroy the panel
---   Rivers.UI.Refresh()   -- update labels (called by r_tool when state changes)
+--   MartianWaters.UI.Show()      -- (re)create the panel and attach to GetHUD()
+--   MartianWaters.UI.Hide()      -- destroy the panel
+--   MartianWaters.UI.Refresh()   -- update labels (called by r_tool when state changes)
 --
--- The panel is created on OnMsg.NewMapLoaded by r_lifecycle.lua and destroyed
+-- The panel is created on OnMsg.NewMapLoaded by mw_lifecycle.lua and destroyed
 -- on OnMsg.DoneMap. It is NOT shown on the main menu.
 
-local Rivers = rawget(_G, "Rivers")
-if type(Rivers) ~= "table" then
+local MartianWaters = rawget(_G, "MartianWaters")
+if type(MartianWaters) ~= "table" then
 	return
 end
 
-local DebugLog = Rivers.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
+local DebugLog = MartianWaters.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
 local SCOPE = "UI"
 
 local UI = {}
 
-local PANEL_ID = "RiversWaterToolPanel"
+local PANEL_ID = "MartianWatersWaterToolPanel"
 
 -- Colors / sizing borrowed from scenario-editor's panel for visual consistency.
 local PANEL_BACKGROUND = RGBA(0, 0, 0, 190)
@@ -76,7 +76,7 @@ local function get_panel_parent()
 end
 
 local function destroy_panel()
-	local panel = Rivers.State.ui_panel
+	local panel = MartianWaters.State.ui_panel
 	if panel and is_window_alive(panel) then
 		pcall(function()
 			if panel.delete then panel:delete()
@@ -84,24 +84,24 @@ local function destroy_panel()
 			end
 		end)
 	end
-	Rivers.State.ui_panel = false
-	Rivers.State.ui_toggle_button = false
-	Rivers.State.ui_level_label = false
-	Rivers.State.ui_rain_label = false
-	Rivers.State.ui_flow_edit = false
-	Rivers.State.ui_height_edit = false
-	Rivers.State.ui_drainage_edit = false
-	Rivers.State.ui_evaporation_edit = false
-	Rivers.State.ui_infiltration_edit = false
-	Rivers.State.ui_volume_label = false
-	Rivers.State.ui_area_label = false
-	Rivers.State.ui_sealevel_edit = false
+	MartianWaters.State.ui_panel = false
+	MartianWaters.State.ui_toggle_button = false
+	MartianWaters.State.ui_level_label = false
+	MartianWaters.State.ui_rain_label = false
+	MartianWaters.State.ui_flow_edit = false
+	MartianWaters.State.ui_height_edit = false
+	MartianWaters.State.ui_drainage_edit = false
+	MartianWaters.State.ui_evaporation_edit = false
+	MartianWaters.State.ui_infiltration_edit = false
+	MartianWaters.State.ui_volume_label = false
+	MartianWaters.State.ui_area_label = false
+	MartianWaters.State.ui_sealevel_edit = false
 end
 
 local function update_toggle_visual()
-	local btn = Rivers.State.ui_toggle_button
+	local btn = MartianWaters.State.ui_toggle_button
 	if not is_window_alive(btn) then return end
-	local Tool = Rivers.Tool
+	local Tool = MartianWaters.Tool
 	local active = Tool and Tool.IsActive() == true or false
 	local label = active and "Water Mode: ON  (click a hole)" or "Activate Water Mode"
 	pcall(function() btn:SetText(label) end)
@@ -140,7 +140,7 @@ local function refresh_input_fields(seg)
 	local get_focus = rawget(_G, "GetKeyboardFocus")
 	local focused = type(get_focus) == "function" and get_focus() or nil
 	for i = 1, #INPUT_FIELDS do
-		local edit = Rivers.State[INPUT_FIELDS[i].state_key]
+		local edit = MartianWaters.State[INPUT_FIELDS[i].state_key]
 		if is_window_alive(edit) and edit ~= focused then
 			local text = seg and format_float(seg[INPUT_FIELDS[i].seg_field] or 0, 2) or ""
 			pcall(function() edit:SetText(text) end)
@@ -149,9 +149,9 @@ local function refresh_input_fields(seg)
 
 	-- Sea-level field mirrors the SEA (independent of the current marker); blank
 	-- when no sea exists. Tool.GetSeaLevel returns nil if there's no sea.
-	local sea_edit = Rivers.State.ui_sealevel_edit
+	local sea_edit = MartianWaters.State.ui_sealevel_edit
 	if is_window_alive(sea_edit) and sea_edit ~= focused then
-		local Tool = Rivers.Tool
+		local Tool = MartianWaters.Tool
 		local lvl = Tool and Tool.GetSeaLevel and Tool.GetSeaLevel() or nil
 		local text = lvl and format_float(lvl, 2) or ""
 		pcall(function() sea_edit:SetText(text) end)
@@ -161,12 +161,12 @@ end
 -- Read-only readouts: volume (m^3) and water surface area (m^2). Surface area
 -- is the flooded tile area; flooded_area_wu2 -> m^2 divides by guim^2.
 local function update_readouts(seg)
-	local vol_label = Rivers.State.ui_volume_label
+	local vol_label = MartianWaters.State.ui_volume_label
 	if is_window_alive(vol_label) then
 		local text = seg and ("volume:  " .. format_float(seg.volume_m3 or 0, 1) .. " m^3") or "volume:  --"
 		pcall(function() vol_label:SetText(text) end)
 	end
-	local area_label = Rivers.State.ui_area_label
+	local area_label = MartianWaters.State.ui_area_label
 	if is_window_alive(area_label) then
 		local area_m2 = seg and ((seg.flooded_area_wu2 or 0) / (guim * guim)) or nil
 		local text = area_m2 and ("surface: " .. format_float(area_m2, 1) .. " m^2") or "surface: --"
@@ -175,9 +175,9 @@ local function update_readouts(seg)
 end
 
 local function update_level_label()
-	local label = Rivers.State.ui_level_label
-	local seg_id = Rivers.State.current_marker_segment
-	local seg = seg_id and Rivers.State.segments[seg_id] or nil
+	local label = MartianWaters.State.ui_level_label
+	local seg_id = MartianWaters.State.current_marker_segment
+	local seg = seg_id and MartianWaters.State.segments[seg_id] or nil
 
 	-- Keep the input fields + readouts live first; do this whether or not the
 	-- status label exists, since they can survive a missing label.
@@ -191,15 +191,15 @@ local function update_level_label()
 		pcall(function() label:SetText("Click a hole to start") end)
 		return
 	end
-	local Tool = Rivers.Tool
+	local Tool = MartianWaters.Tool
 	local class = (Tool and Tool.GetCurrentDepthClass()) or "dry"
 	pcall(function() label:SetText("source depth: " .. class) end)
 end
 
 local function update_rain_label()
-	local label = Rivers.State.ui_rain_label
+	local label = MartianWaters.State.ui_rain_label
 	if not is_window_alive(label) then return end
-	local Rain = Rivers.Rain
+	local Rain = MartianWaters.Rain
 	local parts = {}
 	local disaster = Rain and Rain.GetDisasterType() or nil
 	if disaster then
@@ -331,7 +331,7 @@ function UI.Show()
 	}, parent)
 
 	x_label:new({
-		Text = "RIVERS",
+		Text = "MARTIAN WATERS",
 		Translate = false,
 		TextStyle = "ConsoleLog",
 		TextColor = TEXT_COLOR,
@@ -342,9 +342,9 @@ function UI.Show()
 
 	-- Toggle button
 	local toggle = make_button(panel, "Activate Water Mode", function()
-		if Rivers.Tool then Rivers.Tool.Toggle() end
+		if MartianWaters.Tool then MartianWaters.Tool.Toggle() end
 	end)
-	Rivers.State.ui_toggle_button = toggle
+	MartianWaters.State.ui_toggle_button = toggle
 
 	-- Status label (filled in by update_level_label on Refresh)
 	local level_label = x_label:new({
@@ -356,13 +356,13 @@ function UI.Show()
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
 	}, panel)
-	Rivers.State.ui_level_label = level_label
+	MartianWaters.State.ui_level_label = level_label
 
 	-- One row per source-parameter: [ label  input  -  + ]. The -/+ buttons
 	-- commit immediately via on_adjust(delta). The input is passive: it just
 	-- holds whatever the player has typed until the Apply button reads it.
-	local repeat_start = (Rivers.Config and Rivers.Config.HYDRO_BUTTON_REPEAT_START_MS) or 300
-	local repeat_interval = (Rivers.Config and Rivers.Config.HYDRO_BUTTON_REPEAT_INTERVAL_MS) or 150
+	local repeat_start = (MartianWaters.Config and MartianWaters.Config.HYDRO_BUTTON_REPEAT_START_MS) or 300
+	local repeat_interval = (MartianWaters.Config and MartianWaters.Config.HYDRO_BUTTON_REPEAT_INTERVAL_MS) or 150
 
 	local function make_param_row(opts, on_adjust)
 		local row = x_window:new({
@@ -397,7 +397,7 @@ function UI.Show()
 		})
 
 		make_button(row, "-", function()
-			if not Rivers.Tool then return end
+			if not MartianWaters.Tool then return end
 			on_adjust(-(opts.step or 1))
 			UI.Refresh()
 		end, {
@@ -406,7 +406,7 @@ function UI.Show()
 		})
 
 		make_button(row, "+", function()
-			if not Rivers.Tool then return end
+			if not MartianWaters.Tool then return end
 			on_adjust(opts.step or 1)
 			UI.Refresh()
 		end, {
@@ -424,86 +424,86 @@ function UI.Show()
 	-- segment's actual_level_m, so the value reflects what the budget tick
 	-- is doing over time (e.g. drains back down when flow < losses).
 	local height_edit = make_param_row({
-		id = "RiversHeightRow",
+		id = "MartianWatersHeightRow",
 		label = "height (lvl):",
-		max_value = (Rivers.Config and Rivers.Config.HYDRO_LEVEL_MAX_M) or 50,
-		step = (Rivers.Config and Rivers.Config.HYDRO_LEVEL_STEP_M) or 0.5,
+		max_value = (MartianWaters.Config and MartianWaters.Config.HYDRO_LEVEL_MAX_M) or 50,
+		step = (MartianWaters.Config and MartianWaters.Config.HYDRO_LEVEL_STEP_M) or 0.5,
 		hint = "m",
 	}, function(delta)
-		Rivers.Tool.AdjustLevel(delta)
+		MartianWaters.Tool.AdjustLevel(delta)
 	end)
 	if height_edit then
-		Rivers.State.ui_height_edit = height_edit
+		MartianWaters.State.ui_height_edit = height_edit
 	else
 		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, height input field omitted")
 	end
 
 	-- Inflow row: source discharge in m^3/s. -/+ adjusts how much water enters.
 	local flow_edit = make_param_row({
-		id = "RiversInflowRow",
+		id = "MartianWatersInflowRow",
 		label = "inflow:",
-		max_value = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_MAX_M3S) or 100,
-		step = (Rivers.Config and Rivers.Config.HYDRO_DISCHARGE_STEP_M3S) or 0.5,
+		max_value = (MartianWaters.Config and MartianWaters.Config.HYDRO_DISCHARGE_MAX_M3S) or 100,
+		step = (MartianWaters.Config and MartianWaters.Config.HYDRO_DISCHARGE_STEP_M3S) or 0.5,
 		hint = "m^3/s",
 	}, function(delta)
-		Rivers.Tool.AdjustDischarge(delta)
+		MartianWaters.Tool.AdjustDischarge(delta)
 	end)
 	if flow_edit then
-		Rivers.State.ui_flow_edit = flow_edit
+		MartianWaters.State.ui_flow_edit = flow_edit
 	else
 		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, inflow input field omitted")
 	end
 
 	-- Drainage row: player-controlled drain in m^3/s (water leaving the system).
 	local drainage_edit = make_param_row({
-		id = "RiversDrainageRow",
+		id = "MartianWatersDrainageRow",
 		label = "drainage:",
-		max_value = (Rivers.Config and Rivers.Config.HYDRO_DRAINAGE_MAX_M3S) or 100,
-		step = (Rivers.Config and Rivers.Config.HYDRO_DRAINAGE_STEP_M3S) or 0.5,
+		max_value = (MartianWaters.Config and MartianWaters.Config.HYDRO_DRAINAGE_MAX_M3S) or 100,
+		step = (MartianWaters.Config and MartianWaters.Config.HYDRO_DRAINAGE_STEP_M3S) or 0.5,
 		hint = "m^3/s",
 	}, function(delta)
-		Rivers.Tool.AdjustDrainage(delta)
+		MartianWaters.Tool.AdjustDrainage(delta)
 	end)
 	if drainage_edit then
-		Rivers.State.ui_drainage_edit = drainage_edit
+		MartianWaters.State.ui_drainage_edit = drainage_edit
 	else
 		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, drainage input field omitted")
 	end
 
 	-- Evaporation row: loss in m^3/s from the surface.
 	local evaporation_edit = make_param_row({
-		id = "RiversEvaporationRow",
+		id = "MartianWatersEvaporationRow",
 		label = "evaporation:",
-		max_value = (Rivers.Config and Rivers.Config.HYDRO_EVAPORATION_MAX_M3S) or 100,
-		step = (Rivers.Config and Rivers.Config.HYDRO_EVAPORATION_STEP_M3S) or 0.1,
+		max_value = (MartianWaters.Config and MartianWaters.Config.HYDRO_EVAPORATION_MAX_M3S) or 100,
+		step = (MartianWaters.Config and MartianWaters.Config.HYDRO_EVAPORATION_STEP_M3S) or 0.1,
 		hint = "m^3/s",
 	}, function(delta)
-		Rivers.Tool.AdjustEvaporation(delta)
+		MartianWaters.Tool.AdjustEvaporation(delta)
 	end)
 	if evaporation_edit then
-		Rivers.State.ui_evaporation_edit = evaporation_edit
+		MartianWaters.State.ui_evaporation_edit = evaporation_edit
 	else
 		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, evaporation input field omitted")
 	end
 
 	-- Infiltration row: loss in m^3/s soaking into the ground.
 	local infiltration_edit = make_param_row({
-		id = "RiversInfiltrationRow",
+		id = "MartianWatersInfiltrationRow",
 		label = "infiltration:",
-		max_value = (Rivers.Config and Rivers.Config.HYDRO_INFILTRATION_MAX_M3S) or 100,
-		step = (Rivers.Config and Rivers.Config.HYDRO_INFILTRATION_STEP_M3S) or 0.1,
+		max_value = (MartianWaters.Config and MartianWaters.Config.HYDRO_INFILTRATION_MAX_M3S) or 100,
+		step = (MartianWaters.Config and MartianWaters.Config.HYDRO_INFILTRATION_STEP_M3S) or 0.1,
 		hint = "m^3/s",
 	}, function(delta)
-		Rivers.Tool.AdjustInfiltration(delta)
+		MartianWaters.Tool.AdjustInfiltration(delta)
 	end)
 	if infiltration_edit then
-		Rivers.State.ui_infiltration_edit = infiltration_edit
+		MartianWaters.State.ui_infiltration_edit = infiltration_edit
 	else
 		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, infiltration input field omitted")
 	end
 
 	-- Read-only readouts: live volume + water surface area of the current body.
-	Rivers.State.ui_volume_label = x_label:new({
+	MartianWaters.State.ui_volume_label = x_label:new({
 		Text = "volume:  --",
 		Translate = false,
 		TextStyle = "ConsoleLog",
@@ -512,7 +512,7 @@ function UI.Show()
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
 	}, panel)
-	Rivers.State.ui_area_label = x_label:new({
+	MartianWaters.State.ui_area_label = x_label:new({
 		Text = "surface: --",
 		Translate = false,
 		TextStyle = "ConsoleLog",
@@ -525,7 +525,7 @@ function UI.Show()
 	-- Apply + Clear All row: Apply commits every typed field value to the
 	-- current source (no Enter shortcut -- only this button commits).
 	local action_row = x_window:new({
-		Id = "RiversActionRow",
+		Id = "MartianWatersActionRow",
 		LayoutMethod = "HList",
 		LayoutHSpacing = 8,
 		HAlign = "stretch",
@@ -543,10 +543,10 @@ function UI.Show()
 		{ state_key = "ui_sealevel_edit", setter = "SetSeaLevel" },
 	}
 	make_button(action_row, "Apply", function()
-		if not Rivers.Tool then return end
+		if not MartianWaters.Tool then return end
 		for i = 1, #apply_specs do
-			local edit = Rivers.State[apply_specs[i].state_key]
-			local fn = Rivers.Tool[apply_specs[i].setter]
+			local edit = MartianWaters.State[apply_specs[i].state_key]
+			local fn = MartianWaters.Tool[apply_specs[i].setter]
 			if edit and is_window_alive(edit) and type(fn) == "function" then
 				local v = edit:GetNumber()
 				if type(v) == "number" then
@@ -558,8 +558,8 @@ function UI.Show()
 	end, { halign = "stretch", min_width = 100, max_width = 120 })
 
 	make_button(action_row, "Clear All Water", function()
-		if type(Rivers.ClearAll) == "function" then
-			Rivers.ClearAll()
+		if type(MartianWaters.ClearAll) == "function" then
+			MartianWaters.ClearAll()
 		end
 		UI.Refresh()
 	end, { halign = "stretch", min_width = 100, max_width = 140 })
@@ -567,8 +567,8 @@ function UI.Show()
 	-- Generate Sea: floods the whole map below a global sea level (one static,
 	-- engine-managed body). Blocked while any other water exists.
 	make_button(panel, "Generate Sea", function()
-		if Rivers.Sea and type(Rivers.Sea.Generate) == "function" then
-			Rivers.Sea.Generate()
+		if MartianWaters.Sea and type(MartianWaters.Sea.Generate) == "function" then
+			MartianWaters.Sea.Generate()
 		end
 		UI.Refresh()
 	end)
@@ -577,16 +577,16 @@ function UI.Show()
 	-- map's lowest terrain). -/+ adjust it live; Apply commits a typed value.
 	-- Acts on the sea regardless of which marker is selected; inert if no sea.
 	local sealevel_edit = make_param_row({
-		id = "RiversSeaLevelRow",
+		id = "MartianWatersSeaLevelRow",
 		label = "sea level:",
-		max_value = (Rivers.Config and Rivers.Config.SEA_LEVEL_MAX_M) or 200,
-		step = (Rivers.Config and Rivers.Config.SEA_LEVEL_STEP_M) or 1,
+		max_value = (MartianWaters.Config and MartianWaters.Config.SEA_LEVEL_MAX_M) or 200,
+		step = (MartianWaters.Config and MartianWaters.Config.SEA_LEVEL_STEP_M) or 1,
 		hint = "m",
 	}, function(delta)
-		Rivers.Tool.AdjustSeaLevel(delta)
+		MartianWaters.Tool.AdjustSeaLevel(delta)
 	end)
 	if sealevel_edit then
-		Rivers.State.ui_sealevel_edit = sealevel_edit
+		MartianWaters.State.ui_sealevel_edit = sealevel_edit
 	else
 		DebugLog.Warn(SCOPE, "XNumberEdit unavailable, sea level field omitted")
 	end
@@ -611,11 +611,11 @@ function UI.Show()
 		MinHeight = ROW_HEIGHT,
 		MaxHeight = ROW_HEIGHT,
 	}, panel)
-	Rivers.State.ui_rain_label = rain_label
+	MartianWaters.State.ui_rain_label = rain_label
 
-	-- Disaster row: Start uses Rivers.Config.DEFAULT_RAIN_PRESET.
+	-- Disaster row: Start uses MartianWaters.Config.DEFAULT_RAIN_PRESET.
 	local disaster_row = x_window:new({
-		Id = "RiversRainDisasterRow",
+		Id = "MartianWatersRainDisasterRow",
 		LayoutMethod = "HList",
 		LayoutHSpacing = 8,
 		HAlign = "stretch",
@@ -624,18 +624,18 @@ function UI.Show()
 	}, panel)
 
 	make_button(disaster_row, "Start Rain", function()
-		if Rivers.Rain then Rivers.Rain.StartDisaster() end
+		if MartianWaters.Rain then MartianWaters.Rain.StartDisaster() end
 		UI.Refresh()
 	end, { halign = "stretch", min_width = 100, max_width = 120 })
 
 	make_button(disaster_row, "Stop Rain", function()
-		if Rivers.Rain then Rivers.Rain.StopDisaster() end
+		if MartianWaters.Rain then MartianWaters.Rain.StopDisaster() end
 		UI.Refresh()
 	end, { halign = "stretch", min_width = 100, max_width = 120 })
 
 	-- Visual row: cosmetic-only override.
 	local visual_row = x_window:new({
-		Id = "RiversRainVisualRow",
+		Id = "MartianWatersRainVisualRow",
 		LayoutMethod = "HList",
 		LayoutHSpacing = 8,
 		HAlign = "stretch",
@@ -644,16 +644,16 @@ function UI.Show()
 	}, panel)
 
 	make_button(visual_row, "Visual On", function()
-		if Rivers.Rain then Rivers.Rain.StartVisual() end
+		if MartianWaters.Rain then MartianWaters.Rain.StartVisual() end
 		UI.Refresh()
 	end, { halign = "stretch", min_width = 100, max_width = 120 })
 
 	make_button(visual_row, "Visual Off", function()
-		if Rivers.Rain then Rivers.Rain.StopVisual() end
+		if MartianWaters.Rain then MartianWaters.Rain.StopVisual() end
 		UI.Refresh()
 	end, { halign = "stretch", min_width = 100, max_width = 120 })
 
-	Rivers.State.ui_panel = panel
+	MartianWaters.State.ui_panel = panel
 	UI.Refresh()
 	DebugLog.Info(SCOPE, "panel shown")
 	return panel
@@ -661,11 +661,11 @@ end
 
 function UI.Hide()
 	-- Make sure the tool is off (tears down the click overlay too) before hiding.
-	if Rivers.Tool and Rivers.Tool.IsActive() then
-		Rivers.Tool.Deactivate()
+	if MartianWaters.Tool and MartianWaters.Tool.IsActive() then
+		MartianWaters.Tool.Deactivate()
 	end
 	destroy_panel()
 	DebugLog.Info(SCOPE, "panel hidden")
 end
 
-Rivers.UI = UI
+MartianWaters.UI = UI

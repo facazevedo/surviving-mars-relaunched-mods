@@ -1,7 +1,7 @@
--- Rivers configuration.
+-- MartianWaters configuration.
 -- Edit these values, then reload the mod or restart the game.
 --
--- All knobs live in the private `config` builder below. The typed Rivers.Config
+-- All knobs live in the private `config` builder below. The typed MartianWaters.Config
 -- view at the bottom of the file is what the rest of the mod reads. ENABLE_MOD
 -- is the master switch; every feature must respect it.
 
@@ -17,7 +17,7 @@ config.EnableMod = true
 -- ============================================================================
 -- DEFAULT RIVER SHAPE
 -- ============================================================================
--- Used when Rivers.Create / Rivers.Demo is called without explicit overrides.
+-- Used when MartianWaters.Create / MartianWaters.Demo is called without explicit overrides.
 -- Distances are in world units (1 meter = guim = 100 wu). The defaults aim for
 -- a "big" river: ~20 hex wide, deep enough that the engine reliably fills it.
 --
@@ -44,7 +44,7 @@ config.DefaultStepMeters = 15
 -- ============================================================================
 -- DEMO PATH
 -- ============================================================================
--- Rivers.Demo() builds a single curved river across the loaded map for quick
+-- MartianWaters.Demo() builds a single curved river across the loaded map for quick
 -- testing. The points below are fractions of the map width/height (0..100).
 -- Three points produce a gentle S; add more for a longer or more winding river.
 config.DemoPathPercents = {
@@ -78,7 +78,7 @@ config.WaterToolSelectRadiusM = 25
 -- ============================================================================
 -- RAIN (UI buttons)
 -- ============================================================================
--- DefaultRainPreset feeds Rivers.Rain.StartDisaster when called without an
+-- DefaultRainPreset feeds MartianWaters.Rain.StartDisaster when called without an
 -- argument (i.e. from the UI button). Must match an Id in the engine's
 -- Presets.MapSettings.RainsDisaster table. Valid in vanilla:
 --   "Normal_VeryLow", "Normal_Low", "Normal_High"
@@ -197,17 +197,17 @@ config.DebugFlood = true
 config.DebugBudget = true
 
 -- ============================================================================
--- Typed config view: Rivers.Config
+-- Typed config view: MartianWaters.Config
 -- ============================================================================
 -- The private `config` builder above is the single source of values. This view
 -- re-exposes the same values under stable UPPERCASE names plus an ENABLE_MOD
 -- master flag, with booleans/numbers coerced, so every module reads a clean
--- typed config (Rivers.Config.*). Edit the settings above, not this view.
+-- typed config (MartianWaters.Config.*). Edit the settings above, not this view.
 
-local Rivers = rawget(_G, "Rivers")
-if type(Rivers) ~= "table" then
-	Rivers = {}
-	rawset(_G, "Rivers", Rivers)
+local MartianWaters = rawget(_G, "MartianWaters")
+if type(MartianWaters) ~= "table" then
+	MartianWaters = {}
+	rawset(_G, "MartianWaters", MartianWaters)
 end
 
 local function as_bool(value)
@@ -289,4 +289,4 @@ C.DEBUG_DEPTH = as_bool(config.DebugDepth)
 C.DEBUG_FLOOD = as_bool(config.DebugFlood)
 C.DEBUG_BUDGET = as_bool(config.DebugBudget)
 
-Rivers.Config = C
+MartianWaters.Config = C

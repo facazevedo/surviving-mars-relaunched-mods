@@ -1,9 +1,9 @@
--- Rivers -- terrain carving along a path.
+-- MartianWaters -- terrain carving along a path.
 --
 -- Public API:
---   Rivers.Terrain.NormalizePath(path)              -> {point, ...} or nil, err
---   Rivers.Terrain.SampleLowestHeight(map, points)  -> int height_wu
---   Rivers.Terrain.CarveBowlAlongPath(map, points, params) -> bbox, floor_wu | nil, err
+--   MartianWaters.Terrain.NormalizePath(path)              -> {point, ...} or nil, err
+--   MartianWaters.Terrain.SampleLowestHeight(map, points)  -> int height_wu
+--   MartianWaters.Terrain.CarveBowlAlongPath(map, points, params) -> bbox, floor_wu | nil, err
 --
 -- The carve uses terrain.SetHeightCircle with mode = const.hsMin: heights are
 -- LOWERED to the target floor and nothing is raised, so a river crossing a
@@ -16,12 +16,12 @@
 --     This mirrors how vanilla landscape buildings work (LandscapeLake bakes
 --     terrain via prefabs) and is documented at the call sites.
 
-local Rivers = rawget(_G, "Rivers")
-if type(Rivers) ~= "table" then
+local MartianWaters = rawget(_G, "MartianWaters")
+if type(MartianWaters) ~= "table" then
 	return
 end
 
-local DebugLog = Rivers.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
+local DebugLog = MartianWaters.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
 
 local Terrain = {}
 local SCOPE = "Terrain"
@@ -47,7 +47,7 @@ function Terrain.NormalizePath(path)
 	if type(path) ~= "table" then
 		return nil, "path must be a table"
 	end
-	local cfg = Rivers.Config or {}
+	local cfg = MartianWaters.Config or {}
 	local n = #path
 	if n < 2 then
 		return nil, "path must contain at least 2 points"
@@ -142,14 +142,14 @@ end
 -- Carve a bowl-shaped channel along the path. Returns the affected bbox and the
 -- floor height (in world units) that should be used for water-level placement.
 --
--- params (all optional, fall back to Rivers.Config defaults):
+-- params (all optional, fall back to MartianWaters.Config defaults):
 --   width_m        -- inner half-width of the flat bottom (meters)
 --   bank_m         -- outer smoothing ring beyond inner (meters)
 --   depth_m        -- floor depth below the lowest natural height on the path
 --   step_m         -- spacing between carve circles along the path
 function Terrain.CarveBowlAlongPath(map, points, params)
 	params = params or {}
-	local cfg = Rivers.Config or {}
+	local cfg = MartianWaters.Config or {}
 	local width_m = params.width_m or cfg.DEFAULT_WIDTH_METERS or 30
 	local bank_m = params.bank_m or cfg.DEFAULT_BANK_METERS or 15
 	local depth_m = params.depth_m or cfg.DEFAULT_DEPTH_METERS or 8
@@ -210,4 +210,4 @@ function Terrain.CarveBowlAlongPath(map, points, params)
 	return bbox, floor_wu
 end
 
-Rivers.Terrain = Terrain
+MartianWaters.Terrain = Terrain

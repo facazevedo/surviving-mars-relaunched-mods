@@ -1,7 +1,7 @@
--- Rivers -- public API.
+-- MartianWaters -- public API.
 --
 -- Globals exposed (call from the in-game console):
---   Rivers.Create(path, params)   -- carve + place water for one river segment
+--   MartianWaters.Create(path, params)   -- carve + place water for one river segment
 --                                    path:    list of {x, y} world units or point()s
 --                                    params:  optional table {
 --                                                width_m, bank_m, depth_m, step_m,
@@ -9,28 +9,28 @@
 --                                             }
 --                                    returns: segment_id (string) on success, or
 --                                             nil, error_string on failure.
---   Rivers.Demo()                 -- build the configured demo river across the map.
---   Rivers.CreateAtCursor(opts)   -- carve a short river through the terrain cursor;
+--   MartianWaters.Demo()                 -- build the configured demo river across the map.
+--   MartianWaters.CreateAtCursor(opts)   -- carve a short river through the terrain cursor;
 --                                    convenient if you don't want to type coords.
 --                                    opts: optional table { length_m, angle_deg, plus any
---                                          params accepted by Rivers.Create }.
---   Rivers.ClearAll()             -- remove every water marker the mod placed.
+--                                          params accepted by MartianWaters.Create }.
+--   MartianWaters.ClearAll()             -- remove every water marker the mod placed.
 --                                    Terrain heights are NOT restored (prototype caveat).
---   Rivers.List()                 -- print active segment ids.
+--   MartianWaters.List()                 -- print active segment ids.
 --
--- All public functions respect Rivers.Config.ENABLE_MOD: if it is false they
+-- All public functions respect MartianWaters.Config.ENABLE_MOD: if it is false they
 -- log and return without touching the map.
 
-local Rivers = rawget(_G, "Rivers")
-if type(Rivers) ~= "table" then
+local MartianWaters = rawget(_G, "MartianWaters")
+if type(MartianWaters) ~= "table" then
 	return
 end
 
-local DebugLog = Rivers.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
+local DebugLog = MartianWaters.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
 local SCOPE = "API"
 
 local function config()
-	return Rivers.Config or {}
+	return MartianWaters.Config or {}
 end
 
 local function current_map()
@@ -68,19 +68,19 @@ end
 -- Create
 -- ----------------------------------------------------------------------------
 
-function Rivers.Create(path, params)
+function MartianWaters.Create(path, params)
 	if config().ENABLE_MOD ~= true then
 		DebugLog.Warn(SCOPE, "Create called but ENABLE_MOD is false")
-		return nil, "Rivers mod disabled in config"
+		return nil, "MartianWaters mod disabled in config"
 	end
 	local map = current_map()
 	if not map then
 		return nil, "no current map (start or load a game first)"
 	end
-	local Terrain = Rivers.Terrain
-	local Water = Rivers.Water
+	local Terrain = MartianWaters.Terrain
+	local Water = MartianWaters.Water
 	if not Terrain or not Water then
-		return nil, "Rivers.Terrain / Rivers.Water modules not loaded"
+		return nil, "MartianWaters.Terrain / MartianWaters.Water modules not loaded"
 	end
 
 	local points, err = Terrain.NormalizePath(path)
@@ -118,7 +118,7 @@ function Rivers.Create(path, params)
 	local bowl_area_m2 = bowl_area_wu2 / (guim * guim)
 	local initial_volume_m3 = bowl_area_m2 * water_level_m
 
-	local id = Rivers.State:RegisterSegment({
+	local id = MartianWaters.State:RegisterSegment({
 		water_obj = obj,
 		bbox = bbox,
 		floor_wu = floor_wu,
@@ -150,7 +150,7 @@ end
 -- Demo
 -- ----------------------------------------------------------------------------
 
-function Rivers.Demo(params)
+function MartianWaters.Demo(params)
 	local map = current_map()
 	if not map then
 		return nil, "no current map (start or load a game first)"
@@ -168,14 +168,14 @@ function Rivers.Demo(params)
 		map_sy = sy,
 		points = #path,
 	})
-	return Rivers.Create(path, params)
+	return MartianWaters.Create(path, params)
 end
 
 -- ----------------------------------------------------------------------------
 -- CreateAtCursor
 -- ----------------------------------------------------------------------------
 
-function Rivers.CreateAtCursor(opts)
+function MartianWaters.CreateAtCursor(opts)
 	opts = opts or {}
 	local get_cursor = rawget(_G, "GetTerrainCursor")
 	if type(get_cursor) ~= "function" then
@@ -201,17 +201,17 @@ function Rivers.CreateAtCursor(opts)
 	DebugLog.Info(SCOPE, "CreateAtCursor", {
 		cx = cx, cy = cy, length_m = length_m, angle_deg = angle_deg,
 	})
-	return Rivers.Create(path, opts)
+	return MartianWaters.Create(path, opts)
 end
 
 -- ----------------------------------------------------------------------------
 -- ClearAll / List
 -- ----------------------------------------------------------------------------
 
-function Rivers.ClearAll()
+function MartianWaters.ClearAll()
 	local map = current_map()
-	local Water = Rivers.Water
-	local segments = Rivers.State.segments
+	local Water = MartianWaters.Water
+	local segments = MartianWaters.State.segments
 	local removed = 0
 	for id, seg in pairs(segments) do
 		if Water and seg.water_obj then
@@ -224,8 +224,8 @@ function Rivers.ClearAll()
 	return removed
 end
 
-function Rivers.List()
-	local segments = Rivers.State.segments
+function MartianWaters.List()
+	local segments = MartianWaters.State.segments
 	local ids = {}
 	for id in pairs(segments) do
 		ids[#ids + 1] = id

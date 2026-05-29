@@ -1,4 +1,4 @@
--- Rivers -- connected flood-fill from each segment source.
+-- MartianWaters -- connected flood-fill from each segment source.
 --
 -- A tile is "flooded" only if both:
 --   (1) terrain_height at the tile center < the segment's actual_level, AND
@@ -11,26 +11,26 @@
 -- bbox expanded by FLOOD_SCAN_MARGIN_M; FLOOD_MAX_TILES is a runaway guard.
 --
 -- Public API:
---   Rivers.Flood.RecomputeSegment(map, seg) -> tile_count, area_wu2
---   Rivers.Flood.Get(seg_id)                -> { tile_count, area_wu2 } | nil
+--   MartianWaters.Flood.RecomputeSegment(map, seg) -> tile_count, area_wu2
+--   MartianWaters.Flood.Get(seg_id)                -> { tile_count, area_wu2 } | nil
 --
 -- The flood-fill writes flooded_tile_count, flooded_area_wu2, surface_area_wu2
 -- into the segment record. Other modules read those; they do NOT keep their
 -- own flood state. Phase 1 stores counts only; visualising the actual tile
 -- positions is a Phase 1.5 (debug overlay) concern.
 
-local Rivers = rawget(_G, "Rivers")
-if type(Rivers) ~= "table" then
+local MartianWaters = rawget(_G, "MartianWaters")
+if type(MartianWaters) ~= "table" then
 	return
 end
 
-local DebugLog = Rivers.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
+local DebugLog = MartianWaters.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
 local SCOPE = "Flood"
 
 local Flood = {}
 
 local function config()
-	return Rivers.Config or {}
+	return MartianWaters.Config or {}
 end
 
 local function meters_to_wu(m)
@@ -179,7 +179,7 @@ end
 
 -- Console convenience: snapshot for a segment id.
 function Flood.Get(seg_id)
-	local seg = Rivers.State.segments[seg_id]
+	local seg = MartianWaters.State.segments[seg_id]
 	if not seg then return nil end
 	return {
 		tile_count = seg.flooded_tile_count or 0,
@@ -187,4 +187,4 @@ function Flood.Get(seg_id)
 	}
 end
 
-Rivers.Flood = Flood
+MartianWaters.Flood = Flood

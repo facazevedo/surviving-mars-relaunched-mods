@@ -1,13 +1,13 @@
--- Rivers -- water-depth sampling + classification.
+-- MartianWaters -- water-depth sampling + classification.
 --
 -- Phase 1 hydrology primitive. Every gameplay effect added in Phase 3 will
 -- decide "is this object affected by water?" by calling Depth.SampleAt and
 -- looking at the returned class, NOT by checking river bbox membership.
 --
 -- Public API:
---   Rivers.Depth.Classify(depth_m)         -> "dry"|"wet"|"shallow"|"deep"|"submerged"
---   Rivers.Depth.SampleAt(map, pt_or_xy)   -> depth_m, class, terrain_h_wu, water_h_wu
---   Rivers.Depth.At(x, y)                  -> class    (console convenience)
+--   MartianWaters.Depth.Classify(depth_m)         -> "dry"|"wet"|"shallow"|"deep"|"submerged"
+--   MartianWaters.Depth.SampleAt(map, pt_or_xy)   -> depth_m, class, terrain_h_wu, water_h_wu
+--   MartianWaters.Depth.At(x, y)                  -> class    (console convenience)
 --
 -- Depth is computed from the engine's own grids:
 --   depth_wu = terrain.GetWaterHeight(map, pt) - terrain.GetHeight(map, pt)
@@ -15,18 +15,18 @@
 -- returns the height of the water surface at the queried column or terrain
 -- height if the column is dry, so a non-positive depth means "dry".
 
-local Rivers = rawget(_G, "Rivers")
-if type(Rivers) ~= "table" then
+local MartianWaters = rawget(_G, "MartianWaters")
+if type(MartianWaters) ~= "table" then
 	return
 end
 
-local DebugLog = Rivers.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
+local DebugLog = MartianWaters.DebugLog or { Info = function() end, Warn = function() end, Error = function() end }
 local SCOPE = "Depth"
 
 local Depth = {}
 
 local function config()
-	return Rivers.Config or {}
+	return MartianWaters.Config or {}
 end
 
 local function current_map()
@@ -133,4 +133,4 @@ function Depth.At(x, y)
 	return class
 end
 
-Rivers.Depth = Depth
+MartianWaters.Depth = Depth

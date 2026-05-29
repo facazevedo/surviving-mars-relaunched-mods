@@ -1,4 +1,4 @@
-# Rivers -- Roadmap
+# Martian Waters -- Roadmap
 
 Long-form phase plan that `README.md` summarises. Each phase is a single mergeable unit; the file is updated as phases land so it stays a forward-looking ledger.
 
@@ -10,14 +10,14 @@ Long-form phase plan that `README.md` summarises. Each phase is a single mergeab
 
 **Deliverables:**
 
-* `Code/r_depth.lua` -- `Depth.Classify(depth_m)` and `Depth.SampleAt(map, pt)` returning `(depth_m, class)`. Classes: `dry`, `wet`, `shallow`, `deep`, `submerged`. Thresholds in `r_config.lua`.
-* `Code/r_flood.lua` -- per-segment connected flood-fill from the source tile, bounded by `actual_level`. Returns flooded-tile list + bbox + total flooded area. Safety cap via `FLOOD_MAX_TILES`.
-* `Code/r_budget.lua` -- per-segment water budget (`discharge`, `volume`, `actual_level`, `spill_level`, `evap_rate`, `infiltration_rate`, `outlet_capacity`). Game-time ticker advances volume each tick; `actual_level` follows.
-* `Code/r_state.lua` extended with new per-segment fields.
-* `Code/r_tool.lua` -- `+` / `-` rewired to `AdjustDischarge` (m^3/s); `AdjustLevel` removed.
-* `Code/r_ui.lua` -- status label shows `discharge`, `volume`, `flooded area`, and `level class` at the source.
-* `Code/r_lifecycle.lua` -- spawns the budget ticker on `Enable`, kills it on `Disable`; ticker re-spawns on `NewMapLoaded`.
-* `Code/r_api.lua` -- exposes `Rivers.Depth.At(x, y)`, `Rivers.Flood.Get(seg_id)`, `Rivers.Budget.Get(seg_id)` for console debugging.
+* `Code/mw_depth.lua` -- `Depth.Classify(depth_m)` and `Depth.SampleAt(map, pt)` returning `(depth_m, class)`. Classes: `dry`, `wet`, `shallow`, `deep`, `submerged`. Thresholds in `mw_config.lua`.
+* `Code/mw_flood.lua` -- per-segment connected flood-fill from the source tile, bounded by `actual_level`. Returns flooded-tile list + bbox + total flooded area. Safety cap via `FLOOD_MAX_TILES`.
+* `Code/mw_budget.lua` -- per-segment water budget (`discharge`, `volume`, `actual_level`, `spill_level`, `evap_rate`, `infiltration_rate`, `outlet_capacity`). Game-time ticker advances volume each tick; `actual_level` follows.
+* `Code/mw_state.lua` extended with new per-segment fields.
+* `Code/mw_tool.lua` -- `+` / `-` rewired to `AdjustDischarge` (m^3/s); `AdjustLevel` removed.
+* `Code/mw_ui.lua` -- status label shows `discharge`, `volume`, `flooded area`, and `level class` at the source.
+* `Code/mw_lifecycle.lua` -- spawns the budget ticker on `Enable`, kills it on `Disable`; ticker re-spawns on `NewMapLoaded`.
+* `Code/mw_api.lua` -- exposes `MartianWaters.Depth.At(x, y)`, `MartianWaters.Flood.Get(seg_id)`, `MartianWaters.Budget.Get(seg_id)` for console debugging.
 
 **Out of scope for Phase 1:**
 
@@ -26,7 +26,7 @@ Long-form phase plan that `README.md` summarises. Each phase is a single mergeab
 
 **Acceptance:**
 
-* `Rivers.Create(path)` still works; a created segment now reports a budget the console can query.
+* `MartianWaters.Create(path)` still works; a created segment now reports a budget the console can query.
 * Pressing `+` raises `discharge`; level rises gradually as volume accumulates. Pressing `-` lowers discharge; level recedes naturally when losses exceed inflow. No "hold the button" mechanic.
 * Spilled water stops at connected tiles only -- an isolated low spot elsewhere on the map does **not** flood.
 * `luac -p` passes on every changed file.
@@ -40,8 +40,8 @@ Long-form phase plan that `README.md` summarises. Each phase is a single mergeab
 
 **Deliverables:**
 
-* `Code/r_overlay.lua` -- a toggleable overlay that paints each flooded tile with a colour matching its depth class.
-* `r_ui.lua` -- a button to toggle the overlay.
+* `Code/mw_overlay.lua` -- a toggleable overlay that paints each flooded tile with a colour matching its depth class.
+* `mw_ui.lua` -- a button to toggle the overlay.
 
 Worth doing before Phase 3 if any behaviour in Phase 1 looks off in-game.
 
