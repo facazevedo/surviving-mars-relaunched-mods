@@ -251,8 +251,8 @@ function Tool.GetSeaLevel()
 	return MartianWaters.Sea and MartianWaters.Sea.GetLevel and MartianWaters.Sea.GetLevel() or nil
 end
 function Tool.SetSeaLevel(v)
-	if not (MartianWaters.Sea and MartianWaters.Sea.SetCurrentLevel) then return nil, "MartianWaters.Sea not loaded" end
-	return MartianWaters.Sea.SetCurrentLevel(v)
+	if not (MartianWaters.Sea and MartianWaters.Sea.SetLevelOrGenerate) then return nil, "MartianWaters.Sea not loaded" end
+	return MartianWaters.Sea.SetLevelOrGenerate(v)
 end
 function Tool.AdjustSeaLevel(d)
 	if not (MartianWaters.Sea and MartianWaters.Sea.AdjustLevel) then return nil, "MartianWaters.Sea not loaded" end

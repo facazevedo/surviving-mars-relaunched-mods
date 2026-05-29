@@ -14,8 +14,7 @@
 --   │  volume:  N m^3             │   <- read-only live volume
 --   │  surface: N m^2             │   <- read-only live water surface area
 --   │  [ Apply ] [ Clear All ]   │   <- Apply commits all typed field values
---   │  [ Generate Sea ]          │   <- floods the whole map below a sea level
---   │  sea level:   [__] [-][+]  │   <- global sea level in m (acts on the sea)
+--   │  sea level:   [__] [-][+]  │   <- >0 generates/sets the sea; <=0 removes it
 --   │                            │
 --   │           RAIN             │   <- section label
 --   │  Rain: none                │   <- status (disaster preset / visual on)
@@ -627,18 +626,10 @@ function UI.Show()
 		UI.Refresh()
 	end, { halign = "stretch", min_width = 100, max_width = 140 })
 
-	-- Generate Sea: floods the whole map below a global sea level (one static,
-	-- engine-managed body). Blocked while any other water exists.
-	make_button(panel, "Generate Sea", function()
-		if MartianWaters.Sea and type(MartianWaters.Sea.Generate) == "function" then
-			MartianWaters.Sea.Generate()
-		end
-		UI.Refresh()
-	end, { primary = true })
-
-	-- Sea level row: dedicated control for the sea's global level (m above the
-	-- map's lowest terrain). -/+ adjust it live; Apply commits a typed value.
-	-- Acts on the sea regardless of which marker is selected; inert if no sea.
+	-- Sea level row: the sole sea control. A positive level auto-generates the
+	-- sea (flooding the whole map below it) or sets it; dropping to <= 0 removes
+	-- the sea. -/+ adjust it live; Apply commits a typed value. Acts on the sea
+	-- regardless of which marker is selected.
 	local sealevel_edit = make_param_row({
 		id = "MartianWatersSeaLevelRow",
 		label = "sea level:",

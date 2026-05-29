@@ -307,24 +307,60 @@ function Sea.SetLevel(seg_id, level_m)
 	return v
 end
 
--- Convenience wrappers that operate on "the sea" (whichever segment is the sea)
--- so the UI's sea-level field doesn't need the segment id. Return nil if no sea.
+-- Remove the sea entirely (level dropped to <= 0): drain its marker over the
+-- whole map and drop the segment. Lakes are untouched. Clears the current
+-- marker if it pointed at the sea.
+function Sea.Remove()
+	local id, seg = Sea.Find()
+	if not id then return false end
+	local map = current_map()
+	local terrain_table = rawget(_G, "terrain")
+	local Water = MartianWaters.Water
+	if Water and type(Water.RemoveMarker) == "function" and seg.water_obj then
+		local apply_box = seg.bbox
+		if terrain_table and type(terrain_table.GetMapSize) == "function" and map then
+			local sx, sy = terrain_table.GetMapSize(map)
+			apply_box = box(0, 0, sx, sy)
+		end
+		Water.RemoveMarker(map, seg.water_obj, apply_box)
+	end
+	MartianWaters.State.segments[id] = nil
+	if MartianWaters.State.current_marker_segment == id then
+		MartianWaters.State.current_marker = false
+		MartianWaters.State.current_marker_segment = false
+	end
+	DebugLog.Info(SCOPE, "sea removed", { id = id })
+	return true
+end
+
+-- Convenience wrappers operating on "the sea" so the UI's sea-level field is the
+-- single control. Return nil level when no sea exists.
 function Sea.GetLevel()
 	local _id, seg = Sea.Find()
 	if not seg then return nil end
 	return seg.actual_level_m or 0
 end
 
-function Sea.SetCurrentLevel(level_m)
+-- The one entry point the sea-level field uses: a positive level generates the
+-- sea (if none) or sets it (if it exists); a level <= 0 removes the sea.
+function Sea.SetLevelOrGenerate(level_m)
+	local v = tonumber(level_m) or 0
+	if v <= 0 then
+		Sea.Remove()
+		return 0
+	end
 	local id = Sea.Find()
-	if not id then return nil, "no sea exists" end
-	return Sea.SetLevel(id, level_m)
+	if id then
+		return Sea.SetLevel(id, v)
+	end
+	return Sea.Generate(v)
 end
 
+-- Step the sea level by delta from its current value (0 when no sea yet), then
+-- route through SetLevelOrGenerate so + can spawn a sea and - can remove it.
 function Sea.AdjustLevel(delta_m)
-	local id, seg = Sea.Find()
-	if not id then return nil, "no sea exists" end
-	return Sea.SetLevel(id, (seg.actual_level_m or 0) + (tonumber(delta_m) or 0))
+	local base = Sea.GetLevel() or 0
+	return Sea.SetLevelOrGenerate(base + (tonumber(delta_m) or 0))
 end
 
 MartianWaters.Sea = Sea
