@@ -18,8 +18,8 @@
 --   │                            │
 --   │           RAIN             │   <- section label
 --   │  Rain: none                │   <- status (disaster preset / visual on)
---   │  [ Start Rain ] [ Stop ]   │   <- disaster start/stop
---   │  [ Visual On ] [ Off ]     │   <- visual override start/stop
+--   │  [ Start/Stop Rain ]       │   <- one toggle for the disaster
+--   │  [ Visual Rain: On/Off ]   │   <- one toggle for the cosmetic override
 --   └────────────────────────────┘
 --
 -- Lifecycle:
@@ -136,6 +136,8 @@ local function destroy_panel()
 	MartianWaters.State.ui_toggle_button = false
 	MartianWaters.State.ui_level_label = false
 	MartianWaters.State.ui_rain_label = false
+	MartianWaters.State.ui_rain_disaster_button = false
+	MartianWaters.State.ui_rain_visual_button = false
 	MartianWaters.State.ui_flow_edit = false
 	MartianWaters.State.ui_height_edit = false
 	MartianWaters.State.ui_drainage_edit = false
@@ -244,20 +246,31 @@ local function update_level_label()
 	pcall(function() label:SetText("source depth: " .. class) end)
 end
 
+-- Set a toggle button's label + background to reflect an on/off state.
+local function set_toggle_button(btn, active, on_text, off_text)
+	if not is_window_alive(btn) then return end
+	pcall(function() btn:SetText(active and on_text or off_text) end)
+	pcall(function() btn:SetBackground(active and BUTTON_ACTIVE or BUTTON_BACKGROUND) end)
+end
+
 local function update_rain_label()
-	local label = MartianWaters.State.ui_rain_label
-	if not is_window_alive(label) then return end
 	local Rain = MartianWaters.Rain
-	local parts = {}
 	local disaster = Rain and Rain.GetDisasterType() or nil
-	if disaster then
-		parts[#parts + 1] = "disaster=" .. tostring(disaster)
+	local visual = Rain and Rain.IsVisualActive() or false
+
+	-- Status line.
+	local label = MartianWaters.State.ui_rain_label
+	if is_window_alive(label) then
+		local parts = {}
+		if disaster then parts[#parts + 1] = "disaster=" .. tostring(disaster) end
+		if visual then parts[#parts + 1] = "visual=on" end
+		local text = "Rain: " .. (#parts > 0 and table.concat(parts, ", ") or "none")
+		pcall(function() label:SetText(text) end)
 	end
-	if Rain and Rain.IsVisualActive() then
-		parts[#parts + 1] = "visual=on"
-	end
-	local text = "Rain: " .. (#parts > 0 and table.concat(parts, ", ") or "none")
-	pcall(function() label:SetText(text) end)
+
+	-- Toggle buttons reflect live state.
+	set_toggle_button(MartianWaters.State.ui_rain_disaster_button, disaster ~= nil, "Stop Rain", "Start Rain")
+	set_toggle_button(MartianWaters.State.ui_rain_visual_button, visual, "Visual Rain: On", "Visual Rain: Off")
 end
 
 function UI.Refresh()
@@ -658,45 +671,22 @@ function UI.Show()
 	}, panel)
 	MartianWaters.State.ui_rain_label = rain_label
 
-	-- Disaster row: Start uses MartianWaters.Config.DEFAULT_RAIN_PRESET.
-	local disaster_row = x_window:new({
-		Id = "MartianWatersRainDisasterRow",
-		LayoutMethod = "HList",
-		LayoutHSpacing = 8,
-		HAlign = "stretch",
-		MinWidth = 220,
-		MaxWidth = 260,
-	}, panel)
-
-	make_button(disaster_row, "Start Rain", function()
-		if MartianWaters.Rain then MartianWaters.Rain.StartDisaster() end
+	-- Single toggle for the rain disaster: label/colour reflect the live state
+	-- (set by update_rain_label on Refresh). Press toggles start/stop.
+	MartianWaters.State.ui_rain_disaster_button = make_button(panel, "Start Rain", function()
+		local Rain = MartianWaters.Rain
+		if not Rain then return end
+		if Rain.GetDisasterType() then Rain.StopDisaster() else Rain.StartDisaster() end
 		UI.Refresh()
-	end, { halign = "stretch", min_width = 100, max_width = 120 })
+	end)
 
-	make_button(disaster_row, "Stop Rain", function()
-		if MartianWaters.Rain then MartianWaters.Rain.StopDisaster() end
+	-- Single toggle for the cosmetic-only visual rain override.
+	MartianWaters.State.ui_rain_visual_button = make_button(panel, "Visual Rain: Off", function()
+		local Rain = MartianWaters.Rain
+		if not Rain then return end
+		if Rain.IsVisualActive() then Rain.StopVisual() else Rain.StartVisual() end
 		UI.Refresh()
-	end, { halign = "stretch", min_width = 100, max_width = 120 })
-
-	-- Visual row: cosmetic-only override.
-	local visual_row = x_window:new({
-		Id = "MartianWatersRainVisualRow",
-		LayoutMethod = "HList",
-		LayoutHSpacing = 8,
-		HAlign = "stretch",
-		MinWidth = 220,
-		MaxWidth = 260,
-	}, panel)
-
-	make_button(visual_row, "Visual On", function()
-		if MartianWaters.Rain then MartianWaters.Rain.StartVisual() end
-		UI.Refresh()
-	end, { halign = "stretch", min_width = 100, max_width = 120 })
-
-	make_button(visual_row, "Visual Off", function()
-		if MartianWaters.Rain then MartianWaters.Rain.StopVisual() end
-		UI.Refresh()
-	end, { halign = "stretch", min_width = 100, max_width = 120 })
+	end)
 
 	MartianWaters.State.ui_panel = panel
 	UI.Refresh()
