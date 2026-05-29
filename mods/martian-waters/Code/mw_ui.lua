@@ -65,7 +65,11 @@ local SECTION_STYLE = "InfopanelTextBlueR"  -- cyan, 20
 local READOUT_STYLE = "InfopanelTextR"      -- white, 18
 local TEXT_STYLE    = "EditorText"          -- Droid Sans, 13 (compact rows)
 
-local PANEL_BACKGROUND = RGBA(14, 22, 30, 232)   -- deep slate, mostly opaque for readability
+-- Transparent: the panel's body is the frosted XBlurRect + the semi-transparent
+-- ip_background frame (like the real infopanel). A flat opaque layer here would
+-- just darken the frost and kill the glassy look. (If the blur ever fails to
+-- render, the panel would be see-through -- acceptable, the frame still shows.)
+local PANEL_BACKGROUND = RGBA(0, 0, 0, 0)
 local PANEL_WIDTH = 300                           -- fixed width so labels never clip
 
 local BUTTON_BACKGROUND = RGBA(32, 46, 56, 235)  -- secondary button
