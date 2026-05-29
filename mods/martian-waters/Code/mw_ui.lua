@@ -507,8 +507,9 @@ function UI.Show()
 		x_frame:new({
 			Dock = "box",
 			Image = "UI/CommonRemaster/title_pad.png",
-			FrameBox = box(0, 0, 35, 0),
+			FrameBox = box(30, 10, 30, 10),   -- as DialogTitleNew frames title_pad
 			Transparency = 102,
+			SqueezeX = false,
 			HandleMouse = false,
 		}, title_row)
 	end
