@@ -994,14 +994,53 @@ function FD.InstallSelectionHooks()
 	end
 end
 
--- Add one shortcut action unless it already exists on the parent.
-function FD.AddShortcut(parent, context, id, name, shortcut, gamepad, on_action)
-	if not parent or not XAction then
+function FD.DebugShortcut(message, data)
+	if not FD.Config or FD.Config.DEBUG_SHORTCUTS ~= true then
 		return
 	end
 
-	if parent.ActionById and parent:ActionById(id) then
-		return
+	local text = "[ForceDelete][Shortcuts] " .. FD.SafeToString(message)
+	if type(data) == "table" then
+		for key, value in pairs(data) do
+			text = text .. " " .. FD.SafeToString(key) .. "=" .. FD.SafeToString(value)
+		end
+	end
+
+	print(text)
+end
+
+-- Add one shortcut action unless it already exists on the parent.
+function FD.AddShortcut(parent, context, id, name, shortcut, gamepad, on_action)
+	if not parent then
+		FD.DebugShortcut("Shortcut registration skipped", {
+			id = id,
+			reason = "missing_parent",
+		})
+		return false
+	end
+
+	local action_by_id = FD.ReadField(parent, "ActionById")
+	if type(action_by_id) ~= "function" then
+		FD.DebugShortcut("Shortcut registration skipped", {
+			id = id,
+			reason = "invalid_shortcut_host",
+			parent_type = type(parent),
+		})
+		return false
+	end
+
+	if not XAction or type(XAction.new) ~= "function" then
+		FD.DebugShortcut("Shortcut registration skipped", {
+			id = id,
+			reason = "xaction_constructor_unavailable",
+			xaction_type = type(XAction),
+		})
+		return false
+	end
+
+	local ok, existing_action = pcall(action_by_id, parent, id)
+	if ok and existing_action then
+		return true
 	end
 
 	-- XAction owns the actual game shortcut binding and calls the matching
@@ -1024,11 +1063,18 @@ function FD.AddShortcut(parent, context, id, name, shortcut, gamepad, on_action)
 			return "break"
 		end,
 	}, parent, context)
+
+	FD.DebugShortcut("Shortcut registered", {
+		id = id,
+		shortcut = shortcut,
+		gamepad = gamepad,
+	})
+	return true
 end
 
 -- Add both diagnostic shortcuts to a shortcut container.
 function FD.AddDiagnosticShortcuts(parent, context)
-	FD.AddShortcut(
+	local added_level_2 = FD.AddShortcut(
 		parent,
 		context,
 		FD.LVL2_ACTION_ID,
@@ -1037,7 +1083,7 @@ function FD.AddDiagnosticShortcuts(parent, context)
 		"LeftShoulder-RightShoulder-ButtonY",
 		FD.RunLevel2ForSelection
 	)
-	FD.AddShortcut(
+	local added_level_1 = FD.AddShortcut(
 		parent,
 		context,
 		FD.LVL1_ACTION_ID,
@@ -1046,12 +1092,18 @@ function FD.AddDiagnosticShortcuts(parent, context)
 		"LeftShoulder-RightShoulder-ButtonX",
 		FD.RunLevel1ForSelection
 	)
+
+	return added_level_1 == true and added_level_2 == true
 end
 
 -- Register diagnostic shortcuts by patching the game shortcut initializer once.
-function FD.PatchGameShortcuts()
+function FD.PatchGameShortcuts(shortcuts_host)
 	-- If the shortcut target already exists, add actions immediately too.
-	FD.AddDiagnosticShortcuts(rawget(_G, "XShortcutsTarget"))
+	local target = shortcuts_host
+	if type(FD.ReadField(target, "ActionById")) ~= "function" then
+		target = rawget(_G, "XShortcutsTarget")
+	end
+	FD.AddDiagnosticShortcuts(target)
 
 	if FD.shortcuts_patched or not GameShortcuts or type(GameShortcuts.Init) ~= "function" then
 		return
@@ -1071,6 +1123,8 @@ end
 
 -- Retry shortcut patching and engine guards when classes/data are ready.
 function FD.InstallShortcutHooks()
+	FD.ChainOnMsg("Shortcuts", "force_delete_shortcuts", FD.PatchGameShortcuts)
+	FD.ChainOnMsg("ShortcutsReloaded", "force_delete_shortcuts", FD.PatchGameShortcuts)
 	FD.ChainOnMsg("ClassesPostprocess", "force_delete_shortcuts", FD.PatchGameShortcuts)
 	FD.ChainOnMsg("DataLoaded", "force_delete_shortcuts", FD.PatchGameShortcuts)
 	FD.ChainOnMsg("ClassesPostprocess", "force_delete_request_guard", FD.PatchRequestUnassignUnit)

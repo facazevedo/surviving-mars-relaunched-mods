@@ -30,10 +30,10 @@ Tested only on Surviving Mars Relaunched v1.0.7 on Windows 11.
 Please complain! I can’t fix what I don’t know is broken: https://github.com/facazevedo/surviving-mars-relaunched-mods/issues]],
 	'short_description', "Ctrl+Delete force-deletes the selected object.",
 	'image', "Mod/ForceDelete/Images/force_delete.jpg",
-	'last_changes', "Major update: added staged dome deletion, support for many object types, Force-delete Inspector diagnostics, safer cleanup for units/vehicles/tasks, improved dome light handling, gamepad shortcuts, and a modular code refactor",
+	'last_changes', "Fixed a Mod Manager load error by deferring Force Delete shortcut registration until the game shortcut host is ready",
 	'id', "ForceDelete",
 	'author', "fredware",
-	'version', 6,
+	'version', 7,
 	'lua_revision', 350453,
 	'saved_with_revision', 392284,
 	'code', {

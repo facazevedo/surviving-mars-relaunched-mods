@@ -14,6 +14,9 @@ FD.Config = FD.Config or {}
 -- Master switch for the bottom-right diagnostic panel.
 FD.Config.DISPLAY_ATTRIBUTES = false
 
+-- Shortcut registration diagnostics. Keep false for normal play.
+FD.Config.DEBUG_SHORTCUTS = false
+
 -- Attribute refresh speed while an object remains selected.
 FD.Config.ATTRIBUTE_REFRESH_INTERVAL_MS = 500
 
