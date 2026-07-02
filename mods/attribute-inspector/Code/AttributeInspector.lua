@@ -6,10 +6,40 @@ local PANEL_ID = "AttributeInspectorDialog"
 local POLL_THREAD = "AttributeInspectorPoll"
 local POLL_INTERVAL_MS = 250
 local PANEL_Z_ORDER = 10000
+local PANEL_BACKGROUND = RGBA(0, 0, 0, 230)
+local PANEL_TEXT_COLOR = RGB(255, 255, 255)
+local TRANSPARENT_BACKGROUND = RGBA(0, 0, 0, 0)
+local PANEL_HEIGHT = 610
+local PANEL_HEADER_HEIGHT = 26
+local PANEL_BODY_HEIGHT = 530
+local SIDE_PANEL_WIDTH = 304
+local CONTENT_PANEL_MIN_WIDTH = 520
+local CONTENT_PANEL_MAX_WIDTH = 680
+local INSPECTOR_PANEL_MIN_WIDTH = SIDE_PANEL_WIDTH + 8 + CONTENT_PANEL_MIN_WIDTH
+local INSPECTOR_PANEL_MAX_WIDTH = SIDE_PANEL_WIDTH + 8 + CONTENT_PANEL_MAX_WIDTH
+local GROUP_BUTTON_WIDTH = 284
+local GROUP_BUTTON_HEIGHT = 26
+local MINIMIZE_BUTTON_WIDTH = 28
+local CLOSE_BUTTON_WIDTH = 28
+local MINIMIZED_BUTTON_WIDTH = 54
+local MINIMIZED_BUTTON_HEIGHT = 32
+local CONTENT_TITLE_MIN_WIDTH =
+    CONTENT_PANEL_MIN_WIDTH - MINIMIZE_BUTTON_WIDTH - CLOSE_BUTTON_WIDTH - 36
+local CONTENT_TITLE_MAX_WIDTH =
+    CONTENT_PANEL_MAX_WIDTH - MINIMIZE_BUTTON_WIDTH - CLOSE_BUTTON_WIDTH - 36
+local GROUP_BUTTON_ACTIVE_BACKGROUND = RGBA(74, 107, 145, 230)
+local GROUP_BUTTON_INACTIVE_BACKGROUND = RGBA(35, 35, 35, 230)
+local GROUP_BUTTON_ROLLOVER_BACKGROUND = RGBA(95, 125, 160, 230)
+local GROUP_BUTTON_PRESSED_BACKGROUND = RGBA(52, 78, 112, 230)
 local MAX_MARKER_GROUP_SCAN = 32
 local MAX_CONTAINED_LABEL_SCAN = 2048
+local DEBUG_LOGS = false
+local DEBUG_DRAG = false
 
 local AttributeInspectorDialog = false
+local AttributeInspectorLastBodyText = false
+local AttributeInspectorControls = {}
+local AttributeInspectorGroupState = false
 
 -- Return an optional engine global without triggering mod-environment errors.
 local function Global(name)
@@ -31,6 +61,48 @@ local function SafeCall(fn, ...)
     return false
 end
 
+-- Convert simple diagnostic values into readable log fragments.
+local function LogValue(value)
+    local value_type = type(value)
+
+    if value_type == "string"
+        or value_type == "number"
+        or value_type == "boolean"
+        or value == nil
+    then
+        return tostring(value)
+    end
+
+    return string.format("<%s>", value_type)
+end
+
+-- Emit optional diagnostics only when the explicit debug flags are enabled.
+local function DebugLog(scope, message, data)
+    if DEBUG_LOGS ~= true then
+        return
+    end
+
+    if scope == "Drag" and DEBUG_DRAG ~= true then
+        return
+    end
+
+    local parts = {
+        string.format("[AttributeInspector][%s] %s", scope, message),
+    }
+
+    if type(data) == "table" then
+        for key, value in pairs(data) do
+            parts[#parts + 1] = string.format(
+                "%s=%s",
+                tostring(key),
+                LogValue(value)
+            )
+        end
+    end
+
+    SafeCall(Global("print"), table.concat(parts, " "))
+end
+
 -- Check whether a map/game object still exists before inspecting or deleting it.
 local function IsGameObjectValid(obj)
     if not obj then
@@ -46,11 +118,26 @@ local function IsGameObjectValid(obj)
     return true
 end
 
+-- Read the engine lifecycle state for X windows without assuming table access is safe.
+local function WindowState(win)
+    if not win then
+        return nil
+    end
+
+    local ok, state = pcall(function()
+        return win.window_state
+    end)
+
+    return ok and state or nil
+end
+
 -- Check whether an X window can still be safely updated.
 local function IsWindowAlive(win)
+    local state = WindowState(win)
+
     return win
-        and win.window_state ~= "destroying"
-        and win.window_state ~= "destroyed"
+        and state ~= "destroying"
+        and state ~= "destroyed"
 end
 
 -- Test an object class relationship through the engine helper when available.
@@ -1404,27 +1491,1857 @@ local function AddObjectLines(lines, title, obj)
     lines[#lines + 1] = string.format("angle = %s", AngleText(obj))
 end
 
+local function AddSectionTitle(lines, title)
+    if lines[#lines] ~= "" then
+        lines[#lines + 1] = ""
+    end
+
+    lines[#lines + 1] = title .. ":"
+end
+
+local function AttributeValue(value)
+    if value == nil then
+        return "N/A"
+    end
+
+    return Text(value)
+end
+
+local function AddAttributeLine(lines, key, value)
+    lines[#lines + 1] = string.format("%s = %s", key, AttributeValue(value))
+end
+
+local function AddFieldLine(lines, obj, key, field)
+    local value = ReadField(obj, field)
+
+    if value == nil then
+        value = ReadProperty(obj, field)
+    end
+
+    AddAttributeLine(lines, key, value)
+end
+
+local function AddMethodLine(lines, obj, key, method)
+    if type(ReadField(obj, method)) ~= "function" then
+        AddAttributeLine(lines, key, nil)
+        return
+    end
+
+    AddAttributeLine(lines, key, CallMethod(obj, method))
+end
+
+local function AddKindLine(lines, obj, class_name)
+    AddAttributeLine(
+        lines,
+        string.format("IsKindOf(obj, \"%s\")", class_name),
+        IsKindOf(obj, class_name)
+    )
+end
+
+local function PointComponent(pos, component)
+    if not pos then
+        return nil
+    end
+
+    local method = ReadField(pos, component)
+
+    if type(method) == "function" then
+        local ok, value = pcall(function()
+            return method(pos)
+        end)
+
+        if ok then
+            return value
+        end
+    end
+
+    return ReadField(pos, component)
+end
+
+local function WorldHex(obj)
+    local world_to_hex = Global("WorldToHex")
+
+    if type(world_to_hex) ~= "function" then
+        return nil, nil
+    end
+
+    local ok, q, r = pcall(function()
+        return world_to_hex(obj)
+    end)
+
+    if ok and q ~= nil and r ~= nil then
+        return q, r
+    end
+
+    return nil, nil
+end
+
+local function WorldHexText(obj)
+    local q, r = WorldHex(obj)
+
+    if q ~= nil and r ~= nil then
+        return string.format("%s/%s", tostring(q), tostring(r))
+    end
+
+    return "N/A"
+end
+
+local function AddDisplayLine(lines, key, value)
+    lines[#lines + 1] = string.format(
+        "%s = %s",
+        tostring(key),
+        value ~= nil and tostring(value) or "N/A"
+    )
+end
+
+local function PackedCall(fn, ...)
+    local packed = {
+        ok = false,
+        n = 0,
+    }
+
+    if type(fn) ~= "function" then
+        return packed
+    end
+
+    local function Capture(ok, ...)
+        packed.ok = ok == true
+        packed.n = select("#", ...)
+
+        for i = 1, packed.n do
+            packed[i] = select(i, ...)
+        end
+    end
+
+    Capture(pcall(fn, ...))
+
+    return packed
+end
+
+local function PackedText(packed)
+    if not packed or packed.ok ~= true then
+        return "N/A"
+    end
+
+    if packed.n == 0 then
+        return "nil"
+    end
+
+    local values = {}
+
+    for i = 1, packed.n do
+        values[#values + 1] = Text(packed[i])
+    end
+
+    return table.concat(values, ", ")
+end
+
+local function PackedFirst(packed)
+    if packed and packed.ok == true and packed.n > 0 then
+        return packed[1]
+    end
+
+    return nil
+end
+
+local function CallMethodPacked(obj, method, ...)
+    local fn = ReadField(obj, method)
+
+    if type(fn) ~= "function" then
+        return {
+            ok = false,
+            n = 0,
+        }
+    end
+
+    return PackedCall(fn, obj, ...)
+end
+
+local function CallMethodFirst(obj, method, ...)
+    return PackedFirst(CallMethodPacked(obj, method, ...))
+end
+
+local function AddMethodCallLine(lines, obj, key, method, ...)
+    AddDisplayLine(lines, key, PackedText(CallMethodPacked(obj, method, ...)))
+end
+
+local function AddGlobalCallLine(lines, key, global_name, ...)
+    AddDisplayLine(lines, key, PackedText(PackedCall(Global(global_name), ...)))
+end
+
+local function RawEntity(obj)
+    return CallMethod(obj, "GetEntity") or ReadField(obj, "entity")
+end
+
+local function BareClassName(obj)
+    local value = ReadField(obj, "class") or CallMethod(obj, "GetClass")
+
+    if value ~= nil then
+        return tostring(value)
+    end
+
+    return tostring(obj)
+end
+
+local function TableCount(value)
+    if type(value) ~= "table" then
+        return nil
+    end
+
+    local count = 0
+    local ok = pcall(function()
+        for _ in pairs(value) do
+            count = count + 1
+        end
+    end)
+
+    return ok and count or nil
+end
+
+local function SortedKeys(value)
+    local keys = {}
+
+    if type(value) ~= "table" then
+        return keys
+    end
+
+    pcall(function()
+        for key in pairs(value) do
+            keys[#keys + 1] = key
+        end
+    end)
+
+    table.sort(keys, function(a, b)
+        return tostring(a) < tostring(b)
+    end)
+
+    return keys
+end
+
+local function CompactTableText(value, max_items)
+    if type(value) ~= "table" then
+        return Text(value)
+    end
+
+    local keys = SortedKeys(value)
+    local total = #keys
+    local limit = max_items or total
+    local parts = {
+        string.format("count=%d", total),
+    }
+
+    for i = 1, math.min(total, limit) do
+        local key = keys[i]
+        parts[#parts + 1] = string.format("%s=%s", tostring(key), Text(value[key]))
+    end
+
+    if total > limit then
+        parts[#parts + 1] = string.format("... %d more", total - limit)
+    end
+
+    return "{" .. table.concat(parts, ", ") .. "}"
+end
+
+local function ObjectSummaryText(obj)
+    if not IsGameObjectValid(obj) then
+        return Text(obj)
+    end
+
+    return string.format(
+        "%s handle=%s entity=%s pos=%s",
+        BareClassName(obj),
+        HandleText(obj),
+        EntityName(obj),
+        PositionText(obj)
+    )
+end
+
+local function ObjectListText(list, max_items)
+    if type(list) ~= "table" then
+        return Text(list)
+    end
+
+    local count = #list
+    local limit = max_items or count
+    local parts = {
+        string.format("count=%d", count),
+    }
+
+    for i = 1, math.min(count, limit) do
+        parts[#parts + 1] = string.format("[%d]=%s", i, ObjectSummaryText(list[i]))
+    end
+
+    if count > limit then
+        parts[#parts + 1] = string.format("... %d more", count - limit)
+    end
+
+    return "{" .. table.concat(parts, ", ") .. "}"
+end
+
+local function AddTableEntries(lines, title, value, max_items)
+    AddSectionTitle(lines, title)
+    AddDisplayLine(lines, "value", CompactTableText(value, max_items))
+
+    if type(value) ~= "table" then
+        return
+    end
+
+    local keys = SortedKeys(value)
+    local limit = max_items or #keys
+
+    for i = 1, math.min(#keys, limit) do
+        local key = keys[i]
+
+        AddDisplayLine(lines, tostring(key), Text(value[key]))
+    end
+
+    if #keys > limit then
+        AddDisplayLine(lines, "truncated", string.format("%d entries not shown", #keys - limit))
+    end
+end
+
+local function AddFieldSet(lines, obj, fields)
+    for _, item in ipairs(fields) do
+        if type(item) == "table" then
+            AddFieldLine(lines, obj, item[1], item[2])
+        else
+            AddFieldLine(lines, obj, item, item)
+        end
+    end
+end
+
+local function ObjectMap(obj)
+    local map = CallMethod(obj, "GetMap")
+
+    if map then
+        return map
+    end
+
+    local resolve_map = Global("ResolveMap")
+
+    if type(resolve_map) == "function" then
+        map = PackedFirst(PackedCall(resolve_map, obj))
+
+        if map then
+            return map
+        end
+    end
+
+    map = ReadField(obj, "map")
+
+    if map then
+        return map
+    end
+
+    local city = ReadField(obj, "city") or Global("UICity")
+
+    if city and type(ReadField(city, "GetMap")) == "function" then
+        map = CallMethod(city, "GetMap")
+
+        if map then
+            return map
+        end
+    end
+
+    return Global("CurrentMap") or Global("MainMap")
+end
+
+local function ObjectHexGrid(obj)
+    local grid = PackedFirst(PackedCall(Global("GetObjectHexGrid"), obj))
+
+    if grid then
+        return grid
+    end
+
+    local map = ObjectMap(obj)
+
+    return map and ReadField(map, "object_hex_grid") or Global("ObjectGrid")
+end
+
+local function EntityDataFor(entity)
+    local entity_data = Global("EntityData")
+
+    if type(entity_data) == "table" and entity then
+        return entity_data[entity]
+    end
+
+    return nil
+end
+
+local function EntitySurfaceAvailable(obj_or_entity, surface_name)
+    local surfaces = Global("EntitySurfaces")
+    local mask = type(surfaces) == "table" and surfaces[surface_name] or nil
+
+    if not mask then
+        return nil
+    end
+
+    if type(obj_or_entity) == "string" then
+        return PackedFirst(PackedCall(Global("HasAnySurfaces"), obj_or_entity, mask))
+    end
+
+    if type(ReadField(obj_or_entity, "HasAnySurfaces")) == "function" then
+        return PackedFirst(CallMethodPacked(obj_or_entity, "HasAnySurfaces", mask, true))
+    end
+
+    local entity = RawEntity(obj_or_entity)
+
+    if entity then
+        return PackedFirst(PackedCall(Global("HasAnySurfaces"), entity, mask))
+    end
+
+    return nil
+end
+
+local function EntityCollisionMaskAvailable(entity, mask_name)
+    local const = Global("const")
+    local mask = const and const[mask_name] or nil
+
+    if not entity or not mask then
+        return nil
+    end
+
+    return PackedFirst(PackedCall(Global("HasMeshWithCollisionMask"), entity, mask))
+end
+
+local function EnumFlagSet(obj, flag_name)
+    local const = Global("const")
+    local flag = const and const[flag_name] or nil
+
+    if not flag then
+        return nil
+    end
+
+    local packed = CallMethodPacked(obj, "GetEnumFlags", flag)
+
+    if packed.ok == true and packed.n > 0 and type(packed[1]) == "number" then
+        return packed[1] ~= 0
+    end
+
+    return nil
+end
+
+local function ShapeForObject(obj)
+    local shape = CallMethod(obj, "GetShapePoints")
+
+    if type(shape) == "table" then
+        return shape, "obj:GetShapePoints()"
+    end
+
+    shape = CallMethod(obj, "GetRotatedShapePoints")
+
+    if type(shape) == "table" then
+        return shape, "obj:GetRotatedShapePoints()"
+    end
+
+    local entity = RawEntity(obj)
+
+    if entity then
+        shape = PackedFirst(PackedCall(Global("GetEntityOutlineShape"), entity))
+
+        if type(shape) == "table" then
+            return shape, "GetEntityOutlineShape(entity)"
+        end
+    end
+
+    return nil, "unavailable"
+end
+
+local function TerrainHeightAt(obj)
+    local pos = CallMethod(obj, "GetPos") or ReadField(obj, "pos")
+    local x = PointComponent(pos, "x")
+    local y = PointComponent(pos, "y")
+    local map = ObjectMap(obj)
+
+    if not x or not y then
+        return nil
+    end
+
+    local packed
+
+    if map and type(ReadField(map, "GetHeight")) == "function" then
+        packed = CallMethodPacked(map, "GetHeight", x, y)
+
+        if packed.ok == true then
+            return packed[1]
+        end
+
+        packed = CallMethodPacked(map, "GetHeight", pos)
+
+        if packed.ok == true then
+            return packed[1]
+        end
+    end
+
+    local terrain = Global("terrain")
+    local get_height = terrain and terrain.GetHeight
+
+    packed = PackedCall(get_height, map, x, y)
+
+    if packed.ok == true then
+        return packed[1]
+    end
+
+    packed = PackedCall(get_height, obj, x, y)
+
+    if packed.ok == true then
+        return packed[1]
+    end
+
+    return nil
+end
+
+local function ObjectProperties(obj)
+    local props = nil
+
+    if type(ReadField(obj, "GetProperties")) == "function" then
+        props = PackedFirst(CallMethodPacked(obj, "GetProperties"))
+    end
+
+    if type(props) ~= "table" and type(ReadField(obj, "GatherProperties")) == "function" then
+        props = PackedFirst(CallMethodPacked(obj, "GatherProperties"))
+    end
+
+    if type(props) ~= "table" then
+        props = ReadField(obj, "properties")
+    end
+
+    if type(props) ~= "table" then
+        return {}
+    end
+
+    local result = {}
+
+    for _, prop in ipairs(props) do
+        if type(prop) == "table" and prop.id ~= nil then
+            result[#result + 1] = prop
+        end
+    end
+
+    table.sort(result, function(a, b)
+        local ac = tostring(a.category or "")
+        local bc = tostring(b.category or "")
+
+        if ac ~= bc then
+            return ac < bc
+        end
+
+        return tostring(a.id) < tostring(b.id)
+    end)
+
+    return result
+end
+
+local function AddPropertyDump(lines, obj, title, category_filter)
+    AddSectionTitle(lines, title)
+
+    local props = ObjectProperties(obj)
+    local count = 0
+
+    for _, prop in ipairs(props) do
+        local category = tostring(prop.category or "")
+
+        if not category_filter or category_filter[category] == true then
+            local id = prop.id
+            local value = ReadProperty(obj, id)
+            local label = string.format(
+                "%s%s",
+                category ~= "" and category .. "." or "",
+                tostring(id)
+            )
+
+            AddDisplayLine(lines, label, Text(value))
+            count = count + 1
+        end
+    end
+
+    if count == 0 then
+        AddDisplayLine(lines, "properties", "none")
+    end
+end
+
+local function AddRawFieldDump(lines, obj)
+    AddSectionTitle(lines, "Raw Lua Fields")
+
+    if type(obj) ~= "table" then
+        AddDisplayLine(lines, "fields", "object is not a Lua table")
+        return
+    end
+
+    local keys = SortedKeys(obj)
+
+    if #keys == 0 then
+        AddDisplayLine(lines, "fields", "none")
+        return
+    end
+
+    for _, key in ipairs(keys) do
+        AddDisplayLine(lines, tostring(key), Text(ReadField(obj, key)))
+    end
+end
+
+local function TemplateForObject(obj)
+    local templates = Global("BuildingTemplates")
+    local template_name = ReadField(obj, "template_name")
+        or ReadField(obj, "template_id")
+        or ReadField(obj, "building_class")
+        or ReadField(obj, "template")
+
+    if type(templates) == "table" and template_name and templates[template_name] then
+        return templates[template_name], template_name
+    end
+
+    local template = ReadField(obj, "template")
+        or ReadField(obj, "building_class_proto")
+        or ReadField(obj, "template_obj")
+
+    return template, template_name
+end
+
+local function HexObjectsAt(obj, class_name)
+    local q, r = WorldHex(obj)
+    local grid = ObjectHexGrid(obj)
+
+    if q == nil or r == nil or not grid then
+        return nil
+    end
+
+    local packed
+
+    if class_name then
+        packed = CallMethodPacked(grid, "GetObjects", q, r, class_name)
+    else
+        packed = CallMethodPacked(grid, "GetObjects", q, r)
+    end
+
+    if packed.ok == true and type(packed[1]) == "table" then
+        return packed[1]
+    end
+
+    if class_name then
+        packed = CallMethodPacked(grid, "GetObject", q, r, class_name)
+    else
+        packed = CallMethodPacked(grid, "GetObject", q, r)
+    end
+
+    if packed.ok == true and packed[1] then
+        return { packed[1] }
+    end
+
+    return nil
+end
+
+local function ShapeObjects(obj, class_name, ignore_class)
+    local shape = ShapeForObject(obj)
+    local grid = ObjectHexGrid(obj)
+
+    if type(shape) ~= "table" or not grid then
+        return nil
+    end
+
+    local packed = PackedCall(
+        Global("HexGridShapeGetObjectList"),
+        grid,
+        obj,
+        shape,
+        class_name,
+        ignore_class
+    )
+
+    return packed.ok == true and type(packed[1]) == "table" and packed[1] or nil
+end
+
+local function AddTemplateFields(lines, template, prefix)
+    if not template then
+        AddDisplayLine(lines, prefix .. ".object", "N/A")
+        return
+    end
+
+    AddDisplayLine(lines, prefix .. ".object", Text(template))
+    local fields = {
+        "id",
+        "template_name",
+        "object_class",
+        "template_class",
+        "entity",
+        "display_name",
+        "description",
+        "build_category",
+        "build_pos",
+        "build_points",
+        "instant_build",
+        "is_tall",
+        "dome_required",
+        "dome_forbidden",
+        "dome_spot",
+        "hide_from_build_menu",
+        "construction_cost_Concrete",
+        "construction_cost_Metals",
+        "construction_cost_Polymers",
+        "construction_cost_Electronics",
+        "construction_cost_MachineParts",
+        "construction_cost_PreciousMetals",
+        "power_consumption",
+        "air_consumption",
+        "water_consumption",
+        "electricity_consumption",
+        "maintenance_resource_type",
+        "maintenance_resource_amount",
+    }
+
+    for _, field in ipairs(fields) do
+        AddFieldLine(lines, template, prefix .. "." .. field, field)
+    end
+end
+
+local function AddCommonMethodLines(lines, obj, methods)
+    for _, method in ipairs(methods) do
+        AddMethodCallLine(
+            lines,
+            obj,
+            string.format("obj:%s()", method),
+            method
+        )
+    end
+end
+
+local ATTRIBUTE_GROUPS = {
+    {
+        id = "summary",
+        title = "Summary",
+        default_enabled = true,
+    },
+    {
+        id = "identity_class",
+        title = "Identity / Class",
+        default_enabled = true,
+    },
+    {
+        id = "transform_placement",
+        title = "Transform / Placement",
+        default_enabled = true,
+    },
+    {
+        id = "entity_visual_asset",
+        title = "Entity / ArtSpec / Visual Asset",
+        default_enabled = true,
+    },
+    {
+        id = "materials_textures",
+        title = "Materials / Textures",
+        default_enabled = true,
+    },
+    {
+        id = "footprint_hex_shape",
+        title = "Footprint / Hex Shape",
+        default_enabled = true,
+    },
+    {
+        id = "collision_passability",
+        title = "Collision / Passability",
+        default_enabled = true,
+    },
+    {
+        id = "pathfinding_object_grid",
+        title = "Pathfinding / Object Grid",
+        default_enabled = true,
+    },
+    {
+        id = "passage_ramp_specific",
+        title = "Passage / Ramp Specific",
+        default_enabled = true,
+    },
+    {
+        id = "buildability_construction",
+        title = "Buildability / Construction",
+        default_enabled = true,
+    },
+    {
+        id = "work_spots_interaction_spots",
+        title = "Work Spots / Interaction Spots",
+        default_enabled = true,
+    },
+    {
+        id = "ownership_lifecycle",
+        title = "Ownership / Scenario Editor Lifecycle",
+        default_enabled = true,
+    },
+    {
+        id = "ui_selection",
+        title = "UI / Selection",
+        default_enabled = true,
+    },
+    {
+        id = "object_specific",
+        title = "Object-Specific",
+        default_enabled = true,
+    },
+    {
+        id = "raw_lua_advanced",
+        title = "Raw Lua / Advanced",
+        default_enabled = true,
+    },
+}
+
+-- Initialize per-session group state. Default: all groups visible.
+local function EnsureGroupState()
+    if type(AttributeInspectorGroupState) == "table" then
+        return
+    end
+
+    AttributeInspectorGroupState = {}
+
+    for _, group in ipairs(ATTRIBUTE_GROUPS) do
+        AttributeInspectorGroupState[group.id] = group.default_enabled ~= false
+    end
+end
+
+local function IsGroupEnabled(group_id)
+    EnsureGroupState()
+
+    return AttributeInspectorGroupState[group_id] == true
+end
+
+local function SetAllGroupsEnabled(enabled)
+    EnsureGroupState()
+
+    for _, group in ipairs(ATTRIBUTE_GROUPS) do
+        AttributeInspectorGroupState[group.id] = enabled == true
+    end
+
+    AttributeInspectorLastBodyText = false
+end
+
+local function ToggleGroupEnabled(group_id)
+    EnsureGroupState()
+
+    AttributeInspectorGroupState[group_id] =
+        AttributeInspectorGroupState[group_id] ~= true
+    AttributeInspectorLastBodyText = false
+end
+
+local function ShouldShowGroup(group_id, force_all_groups)
+    if force_all_groups == true then
+        return true
+    end
+
+    return IsGroupEnabled(group_id)
+end
+
+-- Keep renderer functions off the chunk-local list; Lua 5.1 caps active locals.
+AttributeInspectorRenderers = Global("AttributeInspectorRenderers") or {}
+
+function AttributeInspectorRenderers.AddWarningLine(lines, message)
+    AddDisplayLine(lines, "warning", message)
+end
+
+function AttributeInspectorRenderers.AddTerrainHeightLines(lines, obj)
+    local pos = CallMethod(obj, "GetPos") or ReadField(obj, "pos")
+    local z = PointComponent(pos, "z")
+    local terrain_z = TerrainHeightAt(obj)
+
+    AddAttributeLine(lines, "terrain_height_at_object", terrain_z)
+
+    if type(z) == "number" and type(terrain_z) == "number" then
+        AddAttributeLine(lines, "height_above_terrain", z - terrain_z)
+    else
+        AddAttributeLine(lines, "height_above_terrain", nil)
+    end
+end
+
+function AttributeInspectorRenderers.AddShapeSummaryLines(lines, obj)
+    local shape, shape_source = ShapeForObject(obj)
+
+    AddAttributeLine(lines, "shape_source", shape_source)
+    AddAttributeLine(lines, "shape_count", type(shape) == "table" and #shape or nil)
+    AddAttributeLine(lines, "shape_points", type(shape) == "table" and CompactTableText(shape, 20) or nil)
+
+    return shape
+end
+
+function AttributeInspectorRenderers.AddEntityDataLines(lines, entity, max_items)
+    local entity_data = EntityDataFor(entity)
+
+    AddAttributeLine(lines, "EntityData[entity]", entity_data)
+
+    if type(entity_data) ~= "table" then
+        return
+    end
+
+    AddDisplayLine(lines, "EntityData.count", TableCount(entity_data))
+    AddFieldSet(lines, entity_data, {
+        { "EntityData.entity", "entity" },
+        { "EntityData.display_name", "display_name" },
+        { "EntityData.editor_category", "editor_category" },
+        { "EntityData.material_type", "material_type" },
+        { "EntityData.surfaces", "surfaces" },
+        { "EntityData.collision", "collision" },
+        { "EntityData.apply_to_grids", "apply_to_grids" },
+        { "EntityData.entity_category", "entity_category" },
+        { "EntityData.state_category", "state_category" },
+        { "EntityData.states", "states" },
+    })
+
+    if max_items then
+        AddTableEntries(lines, "EntityData Selected Fields", entity_data, max_items)
+    end
+end
+
+function AttributeInspectorRenderers.AddMethodGroup(lines, obj, title, methods)
+    AddSectionTitle(lines, title)
+    AddCommonMethodLines(lines, obj, methods)
+end
+
+function AttributeInspectorRenderers.AddSummaryGroup(lines, obj, selected_count, source, marker, marker_source)
+    local shape_objects = ShapeObjects(obj)
+    local hex_objects = HexObjectsAt(obj)
+
+    AddSectionTitle(lines, "Summary")
+    AddAttributeLine(lines, "display_name", ReadField(obj, "display_name") or ReadField(obj, "name"))
+    AddAttributeLine(lines, "class", ClassName(obj))
+    AddAttributeLine(lines, "template_id", ReadField(obj, "template_name") or ReadField(obj, "template_id"))
+    AddAttributeLine(lines, "entity", EntityName(obj))
+    AddAttributeLine(lines, "position", PositionText(obj))
+    AddAttributeLine(lines, "angle / rotation", AngleText(obj))
+    AddAttributeLine(lines, "hex q/r", WorldHexText(obj))
+    AddAttributeLine(lines, "validity", IsGameObjectValid(obj))
+    AddAttributeLine(lines, "selection_source", source)
+    AddAttributeLine(lines, "selected_count", selected_count or 1)
+    AddAttributeLine(lines, "marker_source", marker_source)
+    AddAttributeLine(lines, "marker", marker)
+    AttributeInspectorRenderers.AddTerrainHeightLines(lines, obj)
+    AttributeInspectorRenderers.AddShapeSummaryLines(lines, obj)
+    AddAttributeLine(lines, "objects_at_hex", ObjectListText(hex_objects, 10))
+    AddAttributeLine(lines, "objects_touching_shape", ObjectListText(shape_objects, 10))
+
+    if type(shape_objects) == "table" and #shape_objects > 1 then
+        AttributeInspectorRenderers.AddWarningLine(lines, "multiple objects overlap the inspected footprint")
+    end
+end
+
+function AttributeInspectorRenderers.AddIdentityGroup(lines, obj)
+    local object_class = Global("ObjectClass")
+
+    AddSectionTitle(lines, "Identity / Class")
+    AddAttributeLine(
+        lines,
+        "ObjectClass(obj)",
+        type(object_class) == "function" and SafeCall(object_class, obj) or nil
+    )
+    AddAttributeLine(lines, "class", ClassName(obj))
+    AddAttributeLine(lines, "bare_class", BareClassName(obj))
+    AddFieldSet(lines, obj, {
+        { "obj.class", "class" },
+        { "obj.template_name", "template_name" },
+        { "obj.template_id", "template_id" },
+        { "obj.template", "template" },
+        { "obj.display_name", "display_name" },
+        { "obj.name", "name" },
+        { "obj.id", "id" },
+        { "obj.handle", "handle" },
+        { "obj.entity", "entity" },
+        { "obj.group", "group" },
+        { "obj.labels", "labels" },
+        { "obj.city", "city" },
+        { "obj.map_id", "map_id" },
+        { "obj.persist_baseclass", "persist_baseclass" },
+        { "obj.__parents", "__parents" },
+        { "obj.__hierarchy_cache", "__hierarchy_cache" },
+    })
+    AddMethodCallLine(lines, obj, "obj:GetEntity()", "GetEntity")
+    AddMethodCallLine(lines, obj, "obj:GetClass()", "GetClass")
+    AddAttributeLine(lines, "obj.handle_text", HandleText(obj))
+    AddKindLine(lines, obj, "Building")
+    AddKindLine(lines, obj, "GridObject")
+    AddKindLine(lines, obj, "Unit")
+    AddKindLine(lines, obj, "PassageRamp")
+    AddKindLine(lines, obj, "PassageRampBase")
+    AddKindLine(lines, obj, "PassageGridElement")
+    AddKindLine(lines, obj, "ConstructionSite")
+    AddKindLine(lines, obj, "WaypointsObj")
+    AddKindLine(lines, obj, "AutoAttachObject")
+    AddKindLine(lines, obj, "CObject")
+end
+
+function AttributeInspectorRenderers.AddTransformGroup(lines, obj)
+    local pos = CallMethod(obj, "GetPos") or ReadField(obj, "pos")
+    local visual_pos = CallMethod(obj, "GetVisualPos")
+
+    AddSectionTitle(lines, "Transform / Placement")
+    AddAttributeLine(lines, "obj:GetPos()", pos)
+    AddAttributeLine(lines, "x", PointComponent(pos, "x"))
+    AddAttributeLine(lines, "y", PointComponent(pos, "y"))
+    AddAttributeLine(lines, "z", PointComponent(pos, "z"))
+    AddAttributeLine(lines, "obj:GetVisualPos()", visual_pos)
+    AddAttributeLine(lines, "visual_x", PointComponent(visual_pos, "x"))
+    AddAttributeLine(lines, "visual_y", PointComponent(visual_pos, "y"))
+    AddAttributeLine(lines, "visual_z", PointComponent(visual_pos, "z"))
+    AddAttributeLine(lines, "WorldToHex(obj) q/r", WorldHexText(obj))
+    AttributeInspectorRenderers.AddTerrainHeightLines(lines, obj)
+    AttributeInspectorRenderers.AddMethodGroup(lines, obj, "Transform Methods", {
+        "GetAngle",
+        "GetAxis",
+        "GetScale",
+        "GetObjectBBox",
+        "GetEntityBBox",
+        "GetBSphere",
+        "GetHeight",
+        "GetRadius",
+        "GetVisualPos",
+        "GetPos",
+    })
+    AddFieldSet(lines, obj, {
+        "pos",
+        "angle",
+        "axis",
+        "scale",
+        "orientation",
+        "radius",
+        "height",
+        "bbox",
+        "entity_bbox",
+        "visual_pos",
+        "valid_pos",
+    })
+end
+
+function AttributeInspectorRenderers.AddEntityVisualGroup(lines, obj)
+    local entity = RawEntity(obj)
+    local is_valid_entity = Global("IsValidEntity")
+
+    AddSectionTitle(lines, "Entity / ArtSpec / Visual Asset")
+    AddAttributeLine(lines, "entity", entity)
+    AddAttributeLine(
+        lines,
+        "IsValidEntity(entity)",
+        type(is_valid_entity) == "function" and SafeCall(is_valid_entity, entity) or nil
+    )
+    AttributeInspectorRenderers.AddEntityDataLines(lines, entity, nil)
+    AddFieldSet(lines, obj, {
+        "entity",
+        "forced_entity",
+        "alternative_entity_t",
+        "ArtSpec",
+        "art_spec",
+        "anim_state",
+        "state",
+        "anim",
+        "entity_change_time",
+        "auto_attach_at_init",
+        "auto_attach_mode",
+        "attached",
+        "attaches",
+    })
+    AttributeInspectorRenderers.AddMethodGroup(lines, obj, "Entity Methods", {
+        "HasEntity",
+        "GetEntity",
+        "GetState",
+        "GetStateText",
+        "GetAnim",
+        "GetAnimMoment",
+        "GetAnimPhase",
+        "GetAnimSpeed",
+        "GetLODsCount",
+        "GetNumStates",
+        "GetAttaches",
+    })
+    AddGlobalCallLine(lines, "GetNumStates(entity)", "GetNumStates", entity)
+end
+
+function AttributeInspectorRenderers.AddMaterialsGroup(lines, obj)
+    local entity = RawEntity(obj)
+    local entity_data = EntityDataFor(entity)
+
+    AddSectionTitle(lines, "Materials / Textures")
+    AddAttributeLine(lines, "entity", entity)
+    AddFieldSet(lines, obj, {
+        "material",
+        "material_type",
+        "texture",
+        "color",
+        "color_modifier",
+        "palette",
+        "palette_color",
+        "palette_index",
+        "entity_material",
+        "entity_material_type",
+        "entity_texture",
+    })
+    AttributeInspectorRenderers.AddMethodGroup(lines, obj, "Material Methods", {
+        "GetMaterialType",
+        "GetColorModifier",
+        "GetGameFlags",
+        "GetEnumFlags",
+    })
+
+    if type(entity_data) == "table" then
+        AddFieldSet(lines, entity_data, {
+            { "EntityData.material_type", "material_type" },
+            { "EntityData.material", "material" },
+            { "EntityData.materials", "materials" },
+            { "EntityData.textures", "textures" },
+            { "EntityData.surfaces", "surfaces" },
+        })
+    else
+        AddAttributeLine(lines, "EntityData.material_type", nil)
+    end
+end
+
+function AttributeInspectorRenderers.AddFootprintGroup(lines, obj)
+    local shape = ShapeForObject(obj)
+    local q, r = WorldHex(obj)
+    local grid = ObjectHexGrid(obj)
+
+    AddSectionTitle(lines, "Footprint / Hex Shape")
+    AddAttributeLine(lines, "object_hex_grid", grid)
+    AddAttributeLine(lines, "hex q/r", WorldHexText(obj))
+    AddAttributeLine(lines, "q", q)
+    AddAttributeLine(lines, "r", r)
+    AttributeInspectorRenderers.AddShapeSummaryLines(lines, obj)
+    AddAttributeLine(lines, "GetShapePoints()", PackedText(CallMethodPacked(obj, "GetShapePoints")))
+    AddAttributeLine(lines, "GetRotatedShapePoints()", PackedText(CallMethodPacked(obj, "GetRotatedShapePoints")))
+    AddGlobalCallLine(lines, "GetEntityOutlineShape(entity)", "GetEntityOutlineShape", RawEntity(obj))
+    AddGlobalCallLine(lines, "GetEntityPeripheralShape(entity)", "GetEntityPeripheralShape", RawEntity(obj))
+    AddMethodCallLine(lines, obj, "obj:GetObjectBBox()", "GetObjectBBox")
+    AddMethodCallLine(lines, obj, "obj:GetEntityBBox()", "GetEntityBBox")
+    AddAttributeLine(lines, "objects_at_hex", ObjectListText(HexObjectsAt(obj), 20))
+    AddAttributeLine(lines, "objects_touching_shape", ObjectListText(ShapeObjects(obj), 20))
+
+    if type(shape) ~= "table" then
+        AttributeInspectorRenderers.AddWarningLine(lines, "no footprint shape was found for this object")
+    end
+
+    AddFieldSet(lines, obj, {
+        "shape",
+        "outline_shape",
+        "peripheral_shape",
+        "build_shape",
+        "flatten_shape",
+        "hex_shape",
+        "shape_points",
+        "object_grid",
+        "object_hex_grid",
+        "grid_object",
+        "build_pos",
+    })
+end
+
+function AttributeInspectorRenderers.AddCollisionGroup(lines, obj)
+    local entity = RawEntity(obj)
+    local collision = CallMethodFirst(obj, "GetCollision")
+    local apply_to_grids = CallMethodFirst(obj, "GetApplyToGrids")
+    local collision_surface = EntitySurfaceAvailable(entity, "Collision")
+    local apply_surface = EntitySurfaceAvailable(entity, "ApplyToGrids")
+    local passability_mask = EntityCollisionMaskAvailable(entity, "cmPassability")
+
+    AddSectionTitle(lines, "Collision / Passability")
+    AddAttributeLine(lines, "entity", entity)
+    AttributeInspectorRenderers.AddMethodGroup(lines, obj, "Collision Methods", {
+        "GetCollision",
+        "GetWalkable",
+        "GetApplyToGrids",
+        "GetVisible",
+        "GetGameFlags",
+    })
+    AddAttributeLine(lines, "efCollision", EnumFlagSet(obj, "efCollision"))
+    AddAttributeLine(lines, "efWalkable", EnumFlagSet(obj, "efWalkable"))
+    AddAttributeLine(lines, "efApplyToGrids", EnumFlagSet(obj, "efApplyToGrids"))
+    AddAttributeLine(lines, "efSelectable", EnumFlagSet(obj, "efSelectable"))
+    AddAttributeLine(lines, "efVisible", EnumFlagSet(obj, "efVisible"))
+    AddAttributeLine(lines, "EntitySurfaces.Collision", collision_surface)
+    AddAttributeLine(lines, "EntitySurfaces.ApplyToGrids", apply_surface)
+    AddAttributeLine(lines, "EntitySurfaces.Walk", EntitySurfaceAvailable(entity, "Walk"))
+    AddAttributeLine(lines, "EntitySurfaces.Height", EntitySurfaceAvailable(entity, "Height"))
+    AddAttributeLine(lines, "EntitySurfaces.Terrain", EntitySurfaceAvailable(entity, "Terrain"))
+    AddAttributeLine(lines, "HasMeshWithCollisionMask(cmPassability)", passability_mask)
+    AddAttributeLine(lines, "HasMeshWithCollisionMask(cmDefaultObject)", EntityCollisionMaskAvailable(entity, "cmDefaultObject"))
+    AddAttributeLine(lines, "HasMeshWithCollisionMask(cmTerrain)", EntityCollisionMaskAvailable(entity, "cmTerrain"))
+    AddFieldSet(lines, obj, {
+        "collision",
+        "collision_radius",
+        "passability",
+        "apply_to_grids",
+        "walkable",
+        "visible",
+        "obstacle",
+        "blocking",
+        "is_tall",
+        "radius",
+        "detail_class",
+        "terrain_collision",
+        "force_extend_bb_during_placement_checks",
+    })
+
+    if collision_surface == true and collision == false then
+        AttributeInspectorRenderers.AddWarningLine(lines, "entity has Collision surface but object collision flag is off")
+    end
+
+    if apply_surface == true and apply_to_grids == false then
+        AttributeInspectorRenderers.AddWarningLine(lines, "entity has ApplyToGrids surface but object grid flag is off")
+    end
+
+    if passability_mask == true and apply_to_grids == false then
+        AttributeInspectorRenderers.AddWarningLine(lines, "entity has passability collision mask but is not applying to grids")
+    end
+end
+
+function AttributeInspectorRenderers.AddPathfindingGroup(lines, obj)
+    local map = ObjectMap(obj)
+    local grid = ObjectHexGrid(obj)
+    local q, r = WorldHex(obj)
+    local pos = CallMethod(obj, "GetPos") or ReadField(obj, "pos")
+
+    AddSectionTitle(lines, "Pathfinding / Object Grid")
+    AddAttributeLine(lines, "map", map)
+    AddAttributeLine(lines, "object_hex_grid", grid)
+    AddAttributeLine(lines, "hex q/r", WorldHexText(obj))
+    AddMethodCallLine(lines, map, "map:IsPassable(q, r)", "IsPassable", q, r)
+    AddMethodCallLine(lines, map, "map:GetPassablePointNearby(pos)", "GetPassablePointNearby", pos)
+    AddAttributeLine(lines, "objects_at_hex", ObjectListText(HexObjectsAt(obj), 30))
+    AddAttributeLine(lines, "objects_touching_shape", ObjectListText(ShapeObjects(obj), 30))
+    AddFieldSet(lines, obj, {
+        "pfclass",
+        "pf_class",
+        "path",
+        "pathing",
+        "path_flags",
+        "passable",
+        "impassable",
+        "object_grid",
+        "object_hex_grid",
+        "command",
+        "command_thread",
+        "goto_target",
+        "destination",
+        "route",
+    })
+end
+
+function AttributeInspectorRenderers.AddPassageObjectDetails(lines, title, value)
+    if not IsGameObjectValid(value) then
+        AddDisplayLine(lines, title, Text(value))
+        return
+    end
+
+    AddObjectLines(lines, title, value)
+end
+
+function AttributeInspectorRenderers.AddPassageGroup(lines, obj)
+    local q, r = WorldHex(obj)
+    local grid = ObjectHexGrid(obj)
+    local get_ramp = Global("HexGetPassageRamp")
+    local get_element = Global("HexGetPassageGridElement")
+    local ramp = nil
+    local element = nil
+
+    if q ~= nil and r ~= nil and grid ~= nil then
+        ramp = PackedFirst(PackedCall(get_ramp, grid, q, r))
+        element = PackedFirst(PackedCall(get_element, grid, q, r))
+    end
+
+    AddSectionTitle(lines, "Passage / Ramp Specific")
+    AddAttributeLine(lines, "object_hex_grid", grid)
+    AddAttributeLine(lines, "hex q/r", WorldHexText(obj))
+    AddAttributeLine(lines, "q", q)
+    AddAttributeLine(lines, "r", r)
+    AddAttributeLine(lines, "IsKindOf(obj, \"PassageRamp\")", IsKindOf(obj, "PassageRamp"))
+    AddAttributeLine(lines, "IsKindOf(obj, \"PassageRampBase\")", IsKindOf(obj, "PassageRampBase"))
+    AddAttributeLine(lines, "IsKindOf(obj, \"PassageGridElement\")", IsKindOf(obj, "PassageGridElement"))
+    AddDisplayLine(lines, "HexGetPassageRamp(object_hex_grid, q, r)", ObjectSummaryText(ramp))
+    AddDisplayLine(lines, "HexGetPassageGridElement(object_hex_grid, q, r)", ObjectSummaryText(element))
+    AttributeInspectorRenderers.AddPassageObjectDetails(lines, "Passage ramp at hex", ramp)
+    AttributeInspectorRenderers.AddPassageObjectDetails(lines, "Passage grid element at hex", element)
+    AddFieldSet(lines, obj, {
+        "passage",
+        "passage_grid",
+        "passage_grid_element",
+        "passage_ramp",
+        "passage_direction",
+        "passage_connections",
+        "connections",
+        "track",
+        "track_id",
+        "start_dome",
+        "end_dome",
+        "dome",
+        "build_connection",
+        "entrance",
+        "exit",
+        "status",
+        "block_reason",
+        "node_idx",
+    })
+end
+
+function AttributeInspectorRenderers.AddBuildabilityGroup(lines, obj)
+    local template, template_name = TemplateForObject(obj)
+
+    AddSectionTitle(lines, "Buildability / Construction")
+    AddAttributeLine(lines, "template_name", template_name)
+    AddTemplateFields(lines, template, "template")
+    AttributeInspectorRenderers.AddShapeSummaryLines(lines, obj)
+    AddFieldSet(lines, obj, {
+        "building_class",
+        "building_class_proto",
+        "construction_statuses",
+        "construction_group",
+        "construction_costs",
+        "construction_costs_at_start",
+        "construction_resource_type",
+        "construction_resource_amount",
+        "construction_site",
+        "construction_started",
+        "build_points",
+        "build_pos",
+        "build_category",
+        "build_shape",
+        "flatten_shape",
+        "stockpiles_obstruct",
+        "resource_requests",
+        "resource_stockpiles",
+        "dome_required",
+        "dome_forbidden",
+        "dome_spot",
+        "instant_build",
+        "hide_from_build_menu",
+    })
+    AttributeInspectorRenderers.AddMethodGroup(lines, obj, "Buildability Methods", {
+        "CanConstruct",
+        "GetBuildMenuCategory",
+        "GetBuildPos",
+        "GetConstructionCost",
+        "GetConstructionStatus",
+    })
+end
+
+function AttributeInspectorRenderers.AddSpotLines(lines, obj, spot)
+    local has_spot = CallMethodFirst(obj, "HasSpot", spot)
+    local begin_packed = nil
+    local begin_index = nil
+
+    AddAttributeLine(lines, "HasSpot(" .. spot .. ")", has_spot)
+
+    if has_spot ~= true then
+        return
+    end
+
+    AddMethodCallLine(lines, obj, "GetSpotRange(" .. spot .. ")", "GetSpotRange", spot)
+    begin_packed = CallMethodPacked(obj, "GetSpotBeginIndex", spot)
+    begin_index = PackedFirst(begin_packed)
+    AddDisplayLine(lines, "GetSpotBeginIndex(" .. spot .. ")", PackedText(begin_packed))
+    AddMethodCallLine(lines, obj, "GetSpotEndIndex(" .. spot .. ")", "GetSpotEndIndex", spot)
+
+    if type(begin_index) == "number" and begin_index >= 0 then
+        AddMethodCallLine(lines, obj, "GetSpotPos(" .. tostring(begin_index) .. ")", "GetSpotPos", begin_index)
+    else
+        AddDisplayLine(lines, "GetSpotPos", "N/A")
+    end
+end
+
+function AttributeInspectorRenderers.AddWorkSpotsGroup(lines, obj)
+    local spots = {
+        "Origin",
+        "Work",
+        "work",
+        "Workplace",
+        "Visit",
+        "visit",
+        "Entrance",
+        "Exit",
+        "Idle",
+        "idle",
+        "Interact",
+        "Interaction",
+        "Drone",
+        "drone",
+        "Service",
+        "service",
+        "Outside",
+        "Inside",
+        "Door",
+        "Rover",
+        "Colonist",
+    }
+
+    AddSectionTitle(lines, "Work Spots / Interaction Spots")
+    AddFieldSet(lines, obj, {
+        "work_spot_task",
+        "work_spots",
+        "interaction_spots",
+        "entrance",
+        "exit",
+        "waypoints",
+        "custom_waypoints",
+        "holder",
+        "holder_spot",
+        "attached",
+        "attaches",
+        "auto_attach_at_init",
+        "auto_attach_mode",
+    })
+    AddSectionTitle(lines, "Spot Method Availability")
+    AddDisplayLine(lines, "obj:HasSpot(spot)", type(ReadField(obj, "HasSpot")) == "function" and "exists" or "N/A")
+    AddDisplayLine(lines, "obj:GetSpotRange(spot)", type(ReadField(obj, "GetSpotRange")) == "function" and "exists" or "N/A")
+    AddDisplayLine(lines, "obj:GetSpotBeginIndex(spot)", type(ReadField(obj, "GetSpotBeginIndex")) == "function" and "exists" or "N/A")
+    AddDisplayLine(lines, "obj:GetSpotEndIndex(spot)", type(ReadField(obj, "GetSpotEndIndex")) == "function" and "exists" or "N/A")
+    AddDisplayLine(lines, "obj:GetSpotPos(index)", type(ReadField(obj, "GetSpotPos")) == "function" and "exists" or "N/A")
+
+    for _, spot in ipairs(spots) do
+        AttributeInspectorRenderers.AddSpotLines(lines, obj, spot)
+    end
+end
+
+function AttributeInspectorRenderers.AddOwnershipGroup(lines, obj, marker, marker_source)
+    AddSectionTitle(lines, "Ownership / Scenario Editor Lifecycle")
+    AddAttributeLine(lines, "marker_source", marker_source)
+    AddAttributeLine(lines, "marker", marker)
+
+    if IsGameObjectValid(marker) then
+        AddObjectLines(lines, "Marker object", marker)
+    end
+
+    AddFieldSet(lines, obj, {
+        "mod_id",
+        "mod",
+        "mod_name",
+        "owner",
+        "holder",
+        "parent",
+        "city",
+        "map_id",
+        "realm",
+        "label",
+        "labels",
+        "groups",
+        "created_by",
+        "creator",
+        "editable",
+        "deletable",
+        "can_delete",
+        "scenario_editor",
+        "scenario_editor_id",
+        "scenario_editor_marker",
+        "se_object_id",
+        "se_marker",
+        "se_group",
+        "se_owner",
+        "delete_me",
+        "destroyed",
+        "auto_remove",
+    })
+end
+
+function AttributeInspectorRenderers.SelectedObjValue()
+    local selected_obj = Global("SelectedObj")
+
+    if type(selected_obj) == "function" then
+        return PackedFirst(PackedCall(selected_obj))
+    end
+
+    return selected_obj
+end
+
+function AttributeInspectorRenderers.EditorSelection()
+    local editor = Global("editor")
+
+    if type(editor) == "table" and type(ReadField(editor, "GetSel")) == "function" then
+        local packed = PackedCall(editor.GetSel, editor)
+
+        if packed.ok == true then
+            return packed[1]
+        end
+
+        packed = PackedCall(editor.GetSel)
+
+        if packed.ok == true then
+            return packed[1]
+        end
+    end
+
+    return nil
+end
+
+function AttributeInspectorRenderers.AddUISelectionGroup(lines, obj, selected_count, source)
+    local get_dialog = Global("GetDialog")
+    local get_interface = Global("GetInGameInterface")
+    local selection = SelectedObjects()
+    local editor_selection = AttributeInspectorRenderers.EditorSelection()
+
+    AddSectionTitle(lines, "UI / Selection")
+    AddAttributeLine(lines, "selection_source", source)
+    AddAttributeLine(lines, "selected_count", selected_count or 1)
+    AddAttributeLine(lines, "SelectedObj", AttributeInspectorRenderers.SelectedObjValue())
+    AddAttributeLine(lines, "SelectedObjects()", ObjectListText(selection, 20))
+    AddAttributeLine(lines, "editor.GetSel()", ObjectListText(editor_selection, 20))
+    AddAttributeLine(lines, "GetDialog(\"Infopanel\")", type(get_dialog) == "function" and SafeCall(get_dialog, "Infopanel") or nil)
+    AddAttributeLine(lines, "GetInGameInterface()", type(get_interface) == "function" and SafeCall(get_interface) or nil)
+    AddFieldSet(lines, obj, {
+        "selected",
+        "selection",
+        "is_selected",
+        "ui",
+        "infopanel",
+        "display_name",
+        "rollover_title",
+        "rollover_text",
+        "description",
+        "actions",
+        "ip_template",
+        "ip_template_name",
+    })
+end
+
+function AttributeInspectorRenderers.ClassDefForName(class_name)
+    local classes = Global("g_Classes")
+    local classdef = nil
+
+    if class_name == nil then
+        return nil
+    end
+
+    if type(classes) == "table" and class_name then
+        classdef = classes[class_name]
+
+        if type(classdef) == "table" then
+            return classdef
+        end
+    end
+
+    classdef = Global(class_name)
+
+    return type(classdef) == "table" and classdef or nil
+end
+
+function AttributeInspectorRenderers.IsGenericClassName(class_name)
+    local generic = {
+        Object = true,
+        InitDone = true,
+        PropertyObject = true,
+        MapInterface = true,
+        MapObject = true,
+        CObject = true,
+    }
+
+    return generic[tostring(class_name or "")] == true
+end
+
+function AttributeInspectorRenderers.CollectClassDefs(class_name, entries, seen)
+    local name = tostring(class_name or "")
+
+    if name == "" or seen[name] == true then
+        return
+    end
+
+    seen[name] = true
+
+    local classdef = AttributeInspectorRenderers.ClassDefForName(name)
+
+    if type(classdef) ~= "table" then
+        return
+    end
+
+    if AttributeInspectorRenderers.IsGenericClassName(name) ~= true then
+        entries[#entries + 1] = {
+            name = name,
+            def = classdef,
+        }
+    end
+
+    local parents = ReadField(classdef, "__parents")
+
+    if type(parents) == "table" then
+        for _, parent in ipairs(parents) do
+            AttributeInspectorRenderers.CollectClassDefs(parent, entries, seen)
+        end
+    end
+end
+
+function AttributeInspectorRenderers.ClassDefsForObject(obj)
+    local entries = {}
+    local seen = {}
+    local object_class = Global("ObjectClass")
+    local object_class_value = type(object_class) == "function"
+        and SafeCall(object_class, obj)
+        or nil
+
+    AttributeInspectorRenderers.CollectClassDefs(BareClassName(obj), entries, seen)
+    AttributeInspectorRenderers.CollectClassDefs(ReadField(obj, "class"), entries, seen)
+
+    if type(object_class_value) == "string" then
+        AttributeInspectorRenderers.CollectClassDefs(object_class_value, entries, seen)
+    elseif type(object_class_value) == "table" then
+        AttributeInspectorRenderers.CollectClassDefs(ReadField(object_class_value, "class"), entries, seen)
+    end
+
+    return entries
+end
+
+function AttributeInspectorRenderers.AddObjectSpecificClassList(lines, class_entries)
+    AddSectionTitle(lines, "Object-Specific Classes")
+    AddDisplayLine(lines, "class_count", #class_entries)
+
+    if #class_entries == 0 then
+        AddDisplayLine(lines, "classes", "none discovered")
+        return
+    end
+
+    for index, entry in ipairs(class_entries) do
+        AddDisplayLine(lines, string.format("class[%d]", index), entry.name)
+    end
+end
+
+function AttributeInspectorRenderers.AddObjectSpecificPropertyLines(lines, obj, class_entries)
+    local class_names = {}
+    local count = 0
+
+    for _, entry in ipairs(class_entries) do
+        class_names[entry.name] = true
+    end
+
+    AddSectionTitle(lines, "Object-Specific Properties")
+
+    for _, prop in ipairs(ObjectProperties(obj)) do
+        local defined_in = tostring(prop.defined_in or "")
+
+        if class_names[defined_in] == true then
+            local id = prop.id
+            local value = ReadProperty(obj, id)
+            local label = string.format(
+                "%s.%s",
+                defined_in ~= "" and defined_in or "object",
+                tostring(id)
+            )
+            local details = string.format(
+                "%s | type=%s editor=%s getter=%s setter=%s",
+                Text(value),
+                tostring(prop.type or ""),
+                tostring(prop.editor or ""),
+                tostring(prop.getter or ""),
+                tostring(prop.setter or "")
+            )
+
+            AddDisplayLine(lines, label, details)
+            count = count + 1
+        end
+    end
+
+    if count == 0 then
+        AddDisplayLine(lines, "properties", "none defined directly by discovered object classes")
+    end
+end
+
+function AttributeInspectorRenderers.CollectObjectSpecificMembers(class_entries)
+    local methods = {}
+    local fields = {}
+    local seen_methods = {}
+    local seen_fields = {}
+
+    for _, entry in ipairs(class_entries) do
+        local keys = SortedKeys(entry.def)
+
+        for _, key in ipairs(keys) do
+            local key_text = tostring(key)
+
+            if type(key) == "string"
+                and string.sub(key_text, 1, 2) ~= "__"
+                and key_text ~= "properties"
+            then
+                local value = ReadField(entry.def, key)
+
+                if type(value) == "function" then
+                    if seen_methods[key_text] ~= true then
+                        methods[#methods + 1] = {
+                            name = key_text,
+                            class = entry.name,
+                        }
+                        seen_methods[key_text] = true
+                    end
+                elseif seen_fields[key_text] ~= true then
+                    fields[#fields + 1] = {
+                        name = key_text,
+                        class = entry.name,
+                        default = value,
+                    }
+                    seen_fields[key_text] = true
+                end
+            end
+        end
+    end
+
+    table.sort(methods, function(a, b)
+        return a.name < b.name
+    end)
+
+    table.sort(fields, function(a, b)
+        return a.name < b.name
+    end)
+
+    return methods, fields
+end
+
+function AttributeInspectorRenderers.AddObjectSpecificFieldLines(lines, obj, fields)
+    AddSectionTitle(lines, "Object-Specific Class Fields")
+    AddDisplayLine(lines, "field_count", #fields)
+
+    if #fields == 0 then
+        AddDisplayLine(lines, "fields", "none discovered")
+        return
+    end
+
+    for _, field in ipairs(fields) do
+        local value = ReadField(obj, field.name)
+
+        if value == nil then
+            value = field.default
+        end
+
+        AddDisplayLine(
+            lines,
+            string.format("%s.%s", field.class, field.name),
+            Text(value)
+        )
+    end
+end
+
+function AttributeInspectorRenderers.AddObjectSpecificMethodLines(lines, obj, methods)
+    AddSectionTitle(lines, "Object-Specific Methods")
+    AddDisplayLine(lines, "method_count", #methods)
+
+    if #methods == 0 then
+        AddDisplayLine(lines, "methods", "none discovered")
+        return
+    end
+
+    for _, method in ipairs(methods) do
+        local callable = type(ReadField(obj, method.name)) == "function"
+
+        AddDisplayLine(
+            lines,
+            string.format("%s:%s()", method.class, method.name),
+            callable and "exists" or "class_only"
+        )
+    end
+end
+
+function AttributeInspectorRenderers.AddObjectSpecificGroup(lines, obj)
+    local class_entries = AttributeInspectorRenderers.ClassDefsForObject(obj)
+    local methods, fields = AttributeInspectorRenderers.CollectObjectSpecificMembers(class_entries)
+
+    AttributeInspectorRenderers.AddObjectSpecificClassList(lines, class_entries)
+    AttributeInspectorRenderers.AddObjectSpecificPropertyLines(lines, obj, class_entries)
+    AttributeInspectorRenderers.AddObjectSpecificFieldLines(lines, obj, fields)
+    AttributeInspectorRenderers.AddObjectSpecificMethodLines(lines, obj, methods)
+end
+
+function AttributeInspectorRenderers.AddRawGroup(lines, obj, marker, marker_source)
+    local entity = RawEntity(obj)
+    local template = TemplateForObject(obj)
+    local entity_data = EntityDataFor(entity)
+
+    AddSectionTitle(lines, "Raw Lua / Advanced")
+    AddObjectLines(lines, "Selected object", obj)
+    AddDisplayLine(lines, "marker_source", marker_source)
+
+    if IsGameObjectValid(marker) then
+        AddObjectLines(lines, "Marker object", marker)
+    else
+        AddDisplayLine(lines, "marker", "nil")
+    end
+
+    AddPropertyDump(lines, obj, "All Object Properties", nil)
+    AddRawFieldDump(lines, obj)
+    AddTableEntries(lines, "Template Raw Fields", template, nil)
+    AddTableEntries(lines, "EntityData Raw Fields", entity_data, nil)
+end
+
 -- Build the full inspector text for the first selected object and its marker.
-local function PanelText(obj, selected_count, source)
+local function PanelText(obj, selected_count, source, force_all_groups)
     local marker, marker_source = FindMarker(obj)
     local lines = {
         string.format("source = %s", source),
         string.format("selected_count = %d", selected_count or 1),
         "",
     }
+    local visible_groups = 0
 
-    AddObjectLines(lines, "First selected object:", obj)
-    lines[#lines + 1] = ""
-    lines[#lines + 1] = "Object marker:"
-    lines[#lines + 1] = string.format("marker_source = %s", marker_source)
+    EnsureGroupState()
 
-    if IsGameObjectValid(marker) then
-        AddObjectLines(lines, "Marker object:", marker)
-    else
-        lines[#lines + 1] = "marker = nil"
+    for _, group in ipairs(ATTRIBUTE_GROUPS) do
+        if ShouldShowGroup(group.id, force_all_groups) then
+            visible_groups = visible_groups + 1
+
+            if group.id == "summary" then
+                AttributeInspectorRenderers.AddSummaryGroup(lines, obj, selected_count, source, marker, marker_source)
+            elseif group.id == "identity_class" then
+                AttributeInspectorRenderers.AddIdentityGroup(lines, obj)
+            elseif group.id == "transform_placement" then
+                AttributeInspectorRenderers.AddTransformGroup(lines, obj)
+            elseif group.id == "entity_visual_asset" then
+                AttributeInspectorRenderers.AddEntityVisualGroup(lines, obj)
+            elseif group.id == "materials_textures" then
+                AttributeInspectorRenderers.AddMaterialsGroup(lines, obj)
+            elseif group.id == "footprint_hex_shape" then
+                AttributeInspectorRenderers.AddFootprintGroup(lines, obj)
+            elseif group.id == "collision_passability" then
+                AttributeInspectorRenderers.AddCollisionGroup(lines, obj)
+            elseif group.id == "pathfinding_object_grid" then
+                AttributeInspectorRenderers.AddPathfindingGroup(lines, obj)
+            elseif group.id == "passage_ramp_specific" then
+                AttributeInspectorRenderers.AddPassageGroup(lines, obj)
+            elseif group.id == "buildability_construction" then
+                AttributeInspectorRenderers.AddBuildabilityGroup(lines, obj)
+            elseif group.id == "work_spots_interaction_spots" then
+                AttributeInspectorRenderers.AddWorkSpotsGroup(lines, obj)
+            elseif group.id == "ownership_lifecycle" then
+                AttributeInspectorRenderers.AddOwnershipGroup(lines, obj, marker, marker_source)
+            elseif group.id == "ui_selection" then
+                AttributeInspectorRenderers.AddUISelectionGroup(lines, obj, selected_count, source)
+            elseif group.id == "object_specific" then
+                AttributeInspectorRenderers.AddObjectSpecificGroup(lines, obj)
+            elseif group.id == "raw_lua_advanced" then
+                AttributeInspectorRenderers.AddRawGroup(lines, obj, marker, marker_source)
+            else
+                AddSectionTitle(lines, group.title)
+                AttributeInspectorRenderers.AddWarningLine(lines, "no renderer registered for this attribute group")
+            end
+        end
+    end
+
+    if visible_groups == 0 then
+        lines[#lines + 1] = "No attribute groups selected."
     end
 
     return table.concat(lines, "\n")
+end
+
+local function PrintExportLine(line)
+    SafeCall(Global("print"), "[AttributeInspector][Export] " .. tostring(line or ""))
+end
+
+-- Append the full inspector dump to the active game log.
+function AttributeInspector_ExportToLog()
+    local obj, selected_count, source = SelectedObject()
+
+    PrintExportLine("BEGIN")
+
+    if IsGameObjectValid(obj) then
+        PrintExportLine(string.format("source = %s", source))
+        PrintExportLine(string.format("selected_count = %d", selected_count or 1))
+        PrintExportLine("groups = all")
+        PrintExportLine("")
+
+        local text = PanelText(obj, selected_count, source, true)
+
+        for line in string.gmatch(text .. "\n", "([^\n]*)\n") do
+            PrintExportLine(line)
+        end
+    else
+        PrintExportLine("No object selected.")
+    end
+
+    PrintExportLine("END")
+
+    return true
 end
 
 -- Find a panel child control by id across engine versions.
@@ -1433,7 +3350,13 @@ local function PanelControl(id)
         return false
     end
 
-    local control = ReadField(AttributeInspectorDialog, id)
+    local control = AttributeInspectorControls[id]
+
+    if control then
+        return control
+    end
+
+    control = ReadField(AttributeInspectorDialog, id)
 
     if control then
         return control
@@ -1472,6 +3395,412 @@ local function SetVisible(control, visible)
     end
 end
 
+-- Update a color property through the control setter when this UI version has it.
+local function SetControlColor(control, setter_name, color)
+    local setter = ReadField(control, setter_name)
+
+    if type(setter) == "function" then
+        pcall(function()
+            setter(control, color)
+        end)
+    end
+end
+
+-- Keep hover, focus, and disabled text states visually identical.
+local function LockControlTextColor(control)
+    SetControlColor(control, "SetTextColor", PANEL_TEXT_COLOR)
+    SetControlColor(control, "SetRolloverTextColor", PANEL_TEXT_COLOR)
+    SetControlColor(control, "SetFocusedTextColor", PANEL_TEXT_COLOR)
+    SetControlColor(control, "SetDisabledTextColor", PANEL_TEXT_COLOR)
+    SetControlColor(control, "SetDisabledRolloverTextColor", PANEL_TEXT_COLOR)
+end
+
+-- Keep toggle buttons readable and make active filters visually distinct.
+local function SetGroupButtonState(button, active)
+    if not button then
+        return
+    end
+
+    SetControlColor(
+        button,
+        "SetBackground",
+        active and GROUP_BUTTON_ACTIVE_BACKGROUND or GROUP_BUTTON_INACTIVE_BACKGROUND
+    )
+    SetControlColor(button, "SetRolloverBackground", GROUP_BUTTON_ROLLOVER_BACKGROUND)
+    SetControlColor(button, "SetPressedBackground", GROUP_BUTTON_PRESSED_BACKGROUND)
+    LockControlTextColor(button)
+end
+
+-- Find the draggable inspector root from a nested child control.
+local function InspectorPanelFromControl(control)
+    local current = control
+
+    while current do
+        if type(ReadField(current, "StartDrag")) == "function" then
+            return current
+        end
+
+        current = ReadField(current, "parent")
+    end
+
+    return false
+end
+
+local function UpdateGroupButtons()
+    EnsureGroupState()
+
+    for _, group in ipairs(ATTRIBUTE_GROUPS) do
+        SetGroupButtonState(
+            PanelControl("idGroupButton_" .. group.id),
+            AttributeInspectorGroupState[group.id] == true
+        )
+    end
+end
+
+-- Reset text scroll only when the displayed body content actually changes.
+local function ResetScroll()
+    local scroll_area = PanelControl("idScrollArea")
+
+    if scroll_area and type(ReadField(scroll_area, "ScrollTo")) == "function" then
+        pcall(function()
+            scroll_area:ScrollTo(0, 0, true)
+        end)
+    end
+end
+
+-- Update inspector body text without fighting the user's manual scroll position.
+local function SetBodyText(control, text)
+    local next_text = tostring(text or "")
+
+    if AttributeInspectorLastBodyText == next_text then
+        return
+    end
+
+    AttributeInspectorLastBodyText = next_text
+    SetText(control, next_text)
+    ResetScroll()
+end
+
+-- Extract screen coordinates from an engine point value.
+local function PointXY(pt)
+    if not pt then
+        return false, false
+    end
+
+    local ok, x, y = pcall(function()
+        return pt:xy()
+    end)
+
+    if ok and type(x) == "number" and type(y) == "number" then
+        return x, y
+    end
+
+    local ok_x, px = pcall(function()
+        return pt:x()
+    end)
+    local ok_y, py = pcall(function()
+        return pt:y()
+    end)
+
+    if ok_x and ok_y and type(px) == "number" and type(py) == "number" then
+        return px, py
+    end
+
+    return false, false
+end
+
+-- Extract rectangle coordinates from an engine box value.
+local function BoxMetrics(rect)
+    if not rect then
+        return false, false, false, false
+    end
+
+    local ok, x, y, width, height = pcall(function()
+        return rect:minx(), rect:miny(), rect:sizex(), rect:sizey()
+    end)
+
+    if ok
+        and type(x) == "number"
+        and type(y) == "number"
+        and type(width) == "number"
+        and type(height) == "number"
+    then
+        return x, y, width, height
+    end
+
+    return false, false, false, false
+end
+
+-- Clamp a draggable coordinate to the visible parent area when available.
+local function ClampPanelPosition(panel, x, y, width, height)
+    local parent = ReadField(panel, "parent")
+    local desktop = ReadField(panel, "desktop")
+    local bounds = parent and ReadField(parent, "content_box")
+
+    if not bounds and desktop then
+        bounds = ReadField(desktop, "box")
+    end
+
+    local bounds_x, bounds_y, bounds_width, bounds_height = BoxMetrics(bounds)
+
+    if not bounds_x then
+        return x, y
+    end
+
+    local max_x = bounds_x + math.max(0, bounds_width - width)
+    local max_y = bounds_y + math.max(0, bounds_height - height)
+
+    return math.min(math.max(x, bounds_x), max_x),
+        math.min(math.max(y, bounds_y), max_y)
+end
+
+-- Switch the panel from layout-docked placement to explicit draggable placement.
+local function SetPanelManualBox(panel, x, y, width, height)
+    panel.Dock = "ignore"
+    panel.HAlign = "none"
+    panel.VAlign = "none"
+    panel.Margins = box(0, 0, 0, 0)
+
+    if type(ReadField(panel, "SetBox")) == "function" then
+        pcall(function()
+            panel:SetBox(x, y, width, height)
+        end)
+    end
+end
+
+local function SetPanelSizeLimits(panel, min_width, max_width, min_height, max_height)
+    panel.MinWidth = min_width
+    panel.MaxWidth = max_width
+    panel.MinHeight = min_height
+    panel.MaxHeight = max_height
+end
+
+local function InvalidatePanelLayout(panel)
+    local invalidate_measure = ReadField(panel, "InvalidateMeasure")
+    local invalidate_layout = ReadField(panel, "InvalidateLayout")
+    local invalidate = ReadField(panel, "Invalidate")
+
+    if type(invalidate_measure) == "function" then
+        pcall(function()
+            invalidate_measure(panel)
+        end)
+    end
+
+    if type(invalidate_layout) == "function" then
+        pcall(function()
+            invalidate_layout(panel)
+        end)
+    end
+
+    if type(invalidate) == "function" then
+        pcall(function()
+            invalidate(panel)
+        end)
+    end
+end
+
+local function MinimizedPanelPosition(panel)
+    local parent = ReadField(panel, "parent")
+    local desktop = ReadField(panel, "desktop")
+    local bounds = parent and ReadField(parent, "content_box")
+
+    if not bounds and desktop then
+        bounds = ReadField(desktop, "box")
+    end
+
+    local bounds_x, bounds_y, bounds_width, bounds_height = BoxMetrics(bounds)
+
+    if not bounds_x then
+        return 0, 0
+    end
+
+    return bounds_x + math.max(0, bounds_width - MINIMIZED_BUTTON_WIDTH - 20),
+        bounds_y + math.max(0, bounds_height - MINIMIZED_BUTTON_HEIGHT - 80)
+end
+
+local function SetInspectorPanelMinimized(self, minimized)
+    minimized = minimized == true
+
+    if minimized and self.attribute_inspector_minimized ~= true then
+        local x, y, width, height = BoxMetrics(ReadField(self, "box"))
+
+        if x then
+            self.attribute_inspector_restore_box = {
+                x = x,
+                y = y,
+                width = width,
+                height = height,
+            }
+        end
+    end
+
+    self.attribute_inspector_minimized = minimized
+
+    SetVisible(PanelControl("idSidePanel"), not minimized)
+    SetVisible(PanelControl("idContentPanel"), not minimized)
+    SetVisible(PanelControl("idMinimizedButton"), minimized)
+
+    if minimized then
+        local x, y = MinimizedPanelPosition(self)
+
+        SetPanelSizeLimits(
+            self,
+            MINIMIZED_BUTTON_WIDTH,
+            MINIMIZED_BUTTON_WIDTH,
+            MINIMIZED_BUTTON_HEIGHT,
+            MINIMIZED_BUTTON_HEIGHT
+        )
+        SetPanelManualBox(self, x, y, MINIMIZED_BUTTON_WIDTH, MINIMIZED_BUTTON_HEIGHT)
+    else
+        local restore_box = self.attribute_inspector_restore_box
+
+        SetPanelSizeLimits(
+            self,
+            INSPECTOR_PANEL_MIN_WIDTH,
+            INSPECTOR_PANEL_MAX_WIDTH,
+            PANEL_HEIGHT,
+            PANEL_HEIGHT
+        )
+
+        if restore_box then
+            SetPanelManualBox(
+                self,
+                restore_box.x,
+                restore_box.y,
+                restore_box.width,
+                restore_box.height
+            )
+        else
+            self.Dock = "box"
+            self.HAlign = "right"
+            self.VAlign = "bottom"
+            self.Margins = box(0, 0, 20, 80)
+        end
+    end
+
+    InvalidatePanelLayout(self)
+    DebugLog("UI", "Panel minimized state changed", {
+        minimized = minimized,
+    })
+end
+
+-- Create the non-scroll fallback body if engine scroll controls are unavailable.
+local function CreatePlainBody(panel)
+    if not XText then
+        DebugLog("UI", "Plain body skipped", {
+            reason = "XText_unavailable",
+        })
+        return false
+    end
+
+    local body = XText:new({
+        Id = "idBody",
+        Text = "",
+        Translate = false,
+        TextStyle = "ConsoleLog",
+        TextColor = PANEL_TEXT_COLOR,
+        RolloverTextColor = PANEL_TEXT_COLOR,
+        DisabledTextColor = PANEL_TEXT_COLOR,
+        DisabledRolloverTextColor = PANEL_TEXT_COLOR,
+        HAlign = "stretch",
+        VAlign = "top",
+        WordWrap = true,
+        MinHeight = PANEL_BODY_HEIGHT,
+        MaxHeight = PANEL_BODY_HEIGHT,
+        UseClipBox = true,
+        HandleMouse = false,
+    }, panel)
+    AttributeInspectorControls.idBody = body
+    LockControlTextColor(body)
+
+    return true
+end
+
+-- Create a scrollable inspector body using the engine's standard XScrollArea.
+local function CreateScrollableBody(panel)
+    local x_window = Global("XWindow")
+    local x_scroll_area = Global("XScrollArea")
+    local x_text = Global("XText")
+    local scroll_class = Global("XSleekScroll") or Global("Scrollbar")
+
+    if not x_window or not x_scroll_area or not x_text or not scroll_class then
+        DebugLog("UI", "Scrollable body skipped", {
+            reason = "scroll_controls_unavailable",
+        })
+        return false
+    end
+
+    local ok = pcall(function()
+        local body_container = x_window:new({
+            Id = "idBodyContainer",
+            HAlign = "stretch",
+            VAlign = "stretch",
+            LayoutMethod = "HList",
+            MinWidth = 480,
+            MaxWidth = 640,
+            MinHeight = PANEL_BODY_HEIGHT,
+            MaxHeight = PANEL_BODY_HEIGHT,
+            Background = TRANSPARENT_BACKGROUND,
+            FocusedBackground = TRANSPARENT_BACKGROUND,
+            DisabledBackground = TRANSPARENT_BACKGROUND,
+            HandleMouse = false,
+            ChildrenHandleMouse = true,
+        }, panel)
+
+        local scroll_area = x_scroll_area:new({
+            Id = "idScrollArea",
+            IdNode = false,
+            HAlign = "stretch",
+            VAlign = "stretch",
+            MinWidth = 480,
+            MaxWidth = 640,
+            MinHeight = PANEL_BODY_HEIGHT,
+            MaxHeight = PANEL_BODY_HEIGHT,
+            VScroll = "idScroll",
+            MouseScroll = true,
+            Background = TRANSPARENT_BACKGROUND,
+            FocusedBackground = TRANSPARENT_BACKGROUND,
+            DisabledBackground = TRANSPARENT_BACKGROUND,
+            HandleMouse = true,
+            ChildrenHandleMouse = true,
+        }, body_container)
+        AttributeInspectorControls.idScrollArea = scroll_area
+
+        local body = x_text:new({
+            Id = "idBody",
+            Text = "",
+            Translate = false,
+            TextStyle = "ConsoleLog",
+            TextColor = PANEL_TEXT_COLOR,
+            RolloverTextColor = PANEL_TEXT_COLOR,
+            DisabledTextColor = PANEL_TEXT_COLOR,
+            DisabledRolloverTextColor = PANEL_TEXT_COLOR,
+            HAlign = "stretch",
+            VAlign = "top",
+            WordWrap = true,
+            MinHeight = PANEL_BODY_HEIGHT,
+            HandleMouse = false,
+        }, scroll_area)
+        AttributeInspectorControls.idBody = body
+        LockControlTextColor(body)
+
+        local scroll = scroll_class:new({
+            Id = "idScroll",
+            Dock = "right",
+            Target = "idScrollArea",
+            AutoHide = true,
+        }, body_container)
+        AttributeInspectorControls.idScroll = scroll
+    end)
+
+    if ok ~= true then
+        DebugLog("UI", "Scrollable body creation failed")
+        return false
+    end
+
+    return true
+end
+
 -- Refresh the inspector panel with the current selected object, if any.
 function AttributeInspector_UpdatePanel()
     if not IsWindowAlive(AttributeInspectorDialog) then
@@ -1491,11 +3820,11 @@ function AttributeInspector_UpdatePanel()
                 selected_count or 1
             )
         )
-        SetText(body, PanelText(obj, selected_count, source))
+        SetBodyText(body, PanelText(obj, selected_count, source))
         SetVisible(delete_button, true)
     else
         SetText(title, "Attribute Inspector  (Selected: 0)")
-        SetText(body, "")
+        SetBodyText(body, "")
         SetVisible(delete_button, false)
     end
 end
@@ -1507,62 +3836,631 @@ DefineClass.AttributeInspectorPanel = {
     HAlign = "right",
     VAlign = "bottom",
     Margins = box(0, 0, 20, 80),
-    Padding = box(8, 8, 8, 8),
-    LayoutMethod = "VList",
-    LayoutVSpacing = 4,
-    Clip = "self",
-    MinWidth = 520,
-    MaxWidth = 680,
-    MinHeight = 300,
-    MaxHeight = 600,
-    Background = RGBA(0, 0, 0, 230),
+    Padding = box(0, 0, 0, 0),
+    LayoutMethod = "HList",
+    LayoutHSpacing = 8,
+    Clip = false,
+    MinWidth = INSPECTOR_PANEL_MIN_WIDTH,
+    MaxWidth = INSPECTOR_PANEL_MAX_WIDTH,
+    MinHeight = PANEL_HEIGHT,
+    MaxHeight = PANEL_HEIGHT,
+    Background = TRANSPARENT_BACKGROUND,
+    FocusedBackground = TRANSPARENT_BACKGROUND,
+    DisabledBackground = TRANSPARENT_BACKGROUND,
     HandleMouse = true,
+    ChildrenHandleMouse = true,
 }
+
+function AttributeInspectorPanel:SetMinimized(minimized)
+    return SetInspectorPanelMinimized(self, minimized)
+end
+
+-- Start a drag operation from the panel or title bar.
+function AttributeInspectorPanel:StartDrag(pt, button)
+    if button ~= "L" then
+        return
+    end
+
+    local mouse_x, mouse_y = PointXY(pt)
+    local box_x, box_y, box_width, box_height = BoxMetrics(ReadField(self, "box"))
+
+    if not mouse_x or not box_x then
+        DebugLog("Drag", "Start skipped", {
+            reason = "missing_point_or_box",
+        })
+        return
+    end
+
+    self.drag_start_x = mouse_x
+    self.drag_start_y = mouse_y
+    self.drag_box_x = box_x
+    self.drag_box_y = box_y
+    self.drag_box_width = box_width
+    self.drag_box_height = box_height
+    self.dragging_panel = true
+
+    SetPanelManualBox(self, box_x, box_y, box_width, box_height)
+
+    local desktop = ReadField(self, "desktop")
+
+    if desktop and type(ReadField(desktop, "SetMouseCapture")) == "function" then
+        pcall(function()
+            desktop:SetMouseCapture(self)
+        end)
+    end
+
+    DebugLog("Drag", "Started", {
+        x = box_x,
+        y = box_y,
+        width = box_width,
+        height = box_height,
+    })
+
+    return "break"
+end
+
+-- Move the panel while a drag operation is active.
+function AttributeInspectorPanel:MoveDrag(pt)
+    if self.dragging_panel ~= true then
+        return
+    end
+
+    local mouse_x, mouse_y = PointXY(pt)
+
+    if not mouse_x then
+        return "break"
+    end
+
+    local width = self.drag_box_width or 0
+    local height = self.drag_box_height or 0
+    local x = (self.drag_box_x or 0) + mouse_x - (self.drag_start_x or mouse_x)
+    local y = (self.drag_box_y or 0) + mouse_y - (self.drag_start_y or mouse_y)
+
+    x, y = ClampPanelPosition(self, x, y, width, height)
+    SetPanelManualBox(self, x, y, width, height)
+
+    return "break"
+end
+
+-- End the active drag operation and release mouse capture.
+function AttributeInspectorPanel:StopDrag(pt, button)
+    if button ~= "L" or self.dragging_panel ~= true then
+        return
+    end
+
+    self:MoveDrag(pt)
+    self.dragging_panel = false
+
+    local desktop = ReadField(self, "desktop")
+
+    if desktop and type(ReadField(desktop, "SetMouseCapture")) == "function" then
+        pcall(function()
+            desktop:SetMouseCapture(false)
+        end)
+    end
+
+    DebugLog("Drag", "Stopped")
+
+    return "break"
+end
+
+function AttributeInspectorPanel:OnMouseButtonDown(pt, button)
+    return self:StartDrag(pt, button)
+end
+
+function AttributeInspectorPanel:OnMousePos(pt)
+    return self:MoveDrag(pt)
+end
+
+function AttributeInspectorPanel:OnMouseButtonUp(pt, button)
+    return self:StopDrag(pt, button)
+end
+
+function AttributeInspectorPanel:OnMouseWheelForward()
+    local scroll_area = PanelControl("idScrollArea")
+
+    if scroll_area and type(ReadField(scroll_area, "OnMouseWheelForward")) == "function" then
+        return scroll_area:OnMouseWheelForward()
+    end
+end
+
+function AttributeInspectorPanel:OnMouseWheelBack()
+    local scroll_area = PanelControl("idScrollArea")
+
+    if scroll_area and type(ReadField(scroll_area, "OnMouseWheelBack")) == "function" then
+        return scroll_area:OnMouseWheelBack()
+    end
+end
+
+function AttributeInspectorPanel:OnCaptureLost()
+    if self.dragging_panel == true then
+        DebugLog("Drag", "Capture lost")
+    end
+
+    self.dragging_panel = false
+end
+
+local function ForwardDragFromChild(child, pt, button)
+    local panel = InspectorPanelFromControl(child)
+
+    return panel and panel:StartDrag(pt, button)
+end
+
+local function ForwardDragMoveFromChild(child, pt)
+    local panel = InspectorPanelFromControl(child)
+
+    return panel and panel:MoveDrag(pt)
+end
+
+local function ForwardDragStopFromChild(child, pt, button)
+    local panel = InspectorPanelFromControl(child)
+
+    return panel and panel:StopDrag(pt, button)
+end
+
+local function ForwardWheelForwardFromChild(child)
+    local panel = InspectorPanelFromControl(child)
+
+    return panel and panel:OnMouseWheelForward()
+end
+
+local function ForwardWheelBackFromChild(child)
+    local panel = InspectorPanelFromControl(child)
+
+    return panel and panel:OnMouseWheelBack()
+end
+
+local function CreateGroupToggleButton(parent, group)
+    local button = XTextButton:new({
+        Id = "idGroupButton_" .. group.id,
+        Text = group.button or group.title,
+        Translate = false,
+        TextStyle = "ConsoleLog",
+        TextColor = PANEL_TEXT_COLOR,
+        RolloverTextColor = PANEL_TEXT_COLOR,
+        DisabledTextColor = PANEL_TEXT_COLOR,
+        DisabledRolloverTextColor = PANEL_TEXT_COLOR,
+        HAlign = "left",
+        VAlign = "top",
+        MinWidth = GROUP_BUTTON_WIDTH,
+        MaxWidth = GROUP_BUTTON_WIDTH,
+        MinHeight = GROUP_BUTTON_HEIGHT,
+        MaxHeight = GROUP_BUTTON_HEIGHT,
+    }, parent)
+    AttributeInspectorControls["idGroupButton_" .. group.id] = button
+    LockControlTextColor(button)
+
+    SetGroupButtonState(button, IsGroupEnabled(group.id))
+
+    function button:OnPress()
+        ToggleGroupEnabled(group.id)
+        UpdateGroupButtons()
+        AttributeInspector_UpdatePanel()
+    end
+
+    function button:OnMouseWheelForward()
+        return ForwardWheelForwardFromChild(self)
+    end
+
+    function button:OnMouseWheelBack()
+        return ForwardWheelBackFromChild(self)
+    end
+
+    return button
+end
+
+local function CreateCommandButton(parent, id, text, on_press)
+    local button = XTextButton:new({
+        Id = id,
+        Text = text,
+        Translate = false,
+        TextStyle = "ConsoleLog",
+        TextColor = PANEL_TEXT_COLOR,
+        RolloverTextColor = PANEL_TEXT_COLOR,
+        DisabledTextColor = PANEL_TEXT_COLOR,
+        DisabledRolloverTextColor = PANEL_TEXT_COLOR,
+        HAlign = "left",
+        VAlign = "top",
+        MinWidth = GROUP_BUTTON_WIDTH,
+        MaxWidth = GROUP_BUTTON_WIDTH,
+        MinHeight = GROUP_BUTTON_HEIGHT,
+        MaxHeight = GROUP_BUTTON_HEIGHT,
+    }, parent)
+    AttributeInspectorControls[id] = button
+    LockControlTextColor(button)
+
+    SetGroupButtonState(button, false)
+
+    function button:OnPress()
+        on_press()
+        UpdateGroupButtons()
+        AttributeInspector_UpdatePanel()
+    end
+
+    function button:OnMouseWheelForward()
+        return ForwardWheelForwardFromChild(self)
+    end
+
+    function button:OnMouseWheelBack()
+        return ForwardWheelBackFromChild(self)
+    end
+
+    return button
+end
+
+local function CreateSidePanel(panel)
+    local side_panel = XWindow:new({
+        Id = "idSidePanel",
+        HAlign = "left",
+        VAlign = "stretch",
+        MinWidth = SIDE_PANEL_WIDTH,
+        MaxWidth = SIDE_PANEL_WIDTH,
+        MinHeight = PANEL_HEIGHT,
+        MaxHeight = PANEL_HEIGHT,
+        Padding = box(8, 8, 8, 8),
+        LayoutMethod = "VList",
+        LayoutVSpacing = 4,
+        Clip = "self",
+        Background = PANEL_BACKGROUND,
+        FocusedBackground = PANEL_BACKGROUND,
+        DisabledBackground = PANEL_BACKGROUND,
+        HandleMouse = true,
+        ChildrenHandleMouse = true,
+    }, panel)
+
+    function side_panel:OnMouseButtonDown(pt, button)
+        return ForwardDragFromChild(self, pt, button)
+    end
+
+    function side_panel:OnMousePos(pt)
+        return ForwardDragMoveFromChild(self, pt)
+    end
+
+    function side_panel:OnMouseButtonUp(pt, button)
+        return ForwardDragStopFromChild(self, pt, button)
+    end
+
+    function side_panel:OnMouseWheelForward()
+        return ForwardWheelForwardFromChild(self)
+    end
+
+    function side_panel:OnMouseWheelBack()
+        return ForwardWheelBackFromChild(self)
+    end
+
+    AttributeInspectorControls.idSidePanel = side_panel
+
+    local side_title = XLabel:new({
+        Id = "idSideTitle",
+        Text = "Groups",
+        Translate = false,
+        TextStyle = "ConsoleLog",
+        TextColor = PANEL_TEXT_COLOR,
+        RolloverTextColor = PANEL_TEXT_COLOR,
+        DisabledTextColor = PANEL_TEXT_COLOR,
+        DisabledRolloverTextColor = PANEL_TEXT_COLOR,
+        HAlign = "stretch",
+        VAlign = "top",
+        MinHeight = 22,
+        MaxHeight = 22,
+        HandleMouse = true,
+    }, side_panel)
+    AttributeInspectorControls.idSideTitle = side_title
+    LockControlTextColor(side_title)
+
+    function side_title:OnMouseButtonDown(pt, button)
+        return ForwardDragFromChild(self, pt, button)
+    end
+
+    function side_title:OnMousePos(pt)
+        return ForwardDragMoveFromChild(self, pt)
+    end
+
+    function side_title:OnMouseButtonUp(pt, button)
+        return ForwardDragStopFromChild(self, pt, button)
+    end
+
+    function side_title:OnMouseWheelForward()
+        return ForwardWheelForwardFromChild(self)
+    end
+
+    function side_title:OnMouseWheelBack()
+        return ForwardWheelBackFromChild(self)
+    end
+
+    CreateCommandButton(side_panel, "idAllGroupsButton", "All", function()
+        SetAllGroupsEnabled(true)
+    end)
+
+    CreateCommandButton(side_panel, "idNoGroupsButton", "None", function()
+        SetAllGroupsEnabled(false)
+    end)
+
+    CreateCommandButton(side_panel, "idResetGroupsButton", "Reset", function()
+        SetAllGroupsEnabled(true)
+    end)
+
+    CreateCommandButton(side_panel, "idExportLogButton", "Export Log", function()
+        AttributeInspector_ExportToLog()
+    end)
+
+    for _, group in ipairs(ATTRIBUTE_GROUPS) do
+        CreateGroupToggleButton(side_panel, group)
+    end
+
+    return side_panel
+end
+
+local function CreateContentPanel(panel)
+    local content_panel = XWindow:new({
+        Id = "idContentPanel",
+        HAlign = "left",
+        VAlign = "stretch",
+        MinWidth = CONTENT_PANEL_MIN_WIDTH,
+        MaxWidth = CONTENT_PANEL_MAX_WIDTH,
+        MinHeight = PANEL_HEIGHT,
+        MaxHeight = PANEL_HEIGHT,
+        Padding = box(8, 8, 8, 8),
+        LayoutMethod = "VList",
+        LayoutVSpacing = 4,
+        Clip = "self",
+        Background = PANEL_BACKGROUND,
+        FocusedBackground = PANEL_BACKGROUND,
+        DisabledBackground = PANEL_BACKGROUND,
+        HandleMouse = true,
+        ChildrenHandleMouse = true,
+    }, panel)
+    AttributeInspectorControls.idContentPanel = content_panel
+
+    function content_panel:OnMouseButtonDown(pt, button)
+        return ForwardDragFromChild(self, pt, button)
+    end
+
+    function content_panel:OnMousePos(pt)
+        return ForwardDragMoveFromChild(self, pt)
+    end
+
+    function content_panel:OnMouseButtonUp(pt, button)
+        return ForwardDragStopFromChild(self, pt, button)
+    end
+
+    function content_panel:OnMouseWheelForward()
+        return ForwardWheelForwardFromChild(self)
+    end
+
+    function content_panel:OnMouseWheelBack()
+        return ForwardWheelBackFromChild(self)
+    end
+
+    return content_panel
+end
 
 -- Construct child controls and start the polling fallback thread.
 function AttributeInspectorPanel:Init()
     AttributeInspectorDialog = self
+    AttributeInspectorLastBodyText = false
+    AttributeInspectorControls = {}
+    EnsureGroupState()
 
-    self.idTitle = XLabel:new({
+    local content_panel
+
+    local minimized_button = XTextButton:new({
+        Id = "idMinimizedButton",
+        Text = "AI",
+        Translate = false,
+        TextStyle = "ConsoleLog",
+        TextColor = PANEL_TEXT_COLOR,
+        RolloverTextColor = PANEL_TEXT_COLOR,
+        DisabledTextColor = PANEL_TEXT_COLOR,
+        DisabledRolloverTextColor = PANEL_TEXT_COLOR,
+        HAlign = "stretch",
+        VAlign = "stretch",
+        MinWidth = MINIMIZED_BUTTON_WIDTH,
+        MaxWidth = MINIMIZED_BUTTON_WIDTH,
+        MinHeight = MINIMIZED_BUTTON_HEIGHT,
+        MaxHeight = MINIMIZED_BUTTON_HEIGHT,
+        Visible = false,
+    }, self)
+    AttributeInspectorControls.idMinimizedButton = minimized_button
+    LockControlTextColor(minimized_button)
+    SetControlColor(minimized_button, "SetBackground", GROUP_BUTTON_ACTIVE_BACKGROUND)
+    SetControlColor(minimized_button, "SetRolloverBackground", GROUP_BUTTON_ROLLOVER_BACKGROUND)
+    SetControlColor(minimized_button, "SetPressedBackground", GROUP_BUTTON_PRESSED_BACKGROUND)
+
+    function minimized_button:OnPress()
+        local panel = InspectorPanelFromControl(self)
+
+        if panel and type(ReadField(panel, "SetMinimized")) == "function" then
+            panel:SetMinimized(false)
+        end
+    end
+
+    CreateSidePanel(self)
+    content_panel = CreateContentPanel(self)
+
+    local header = XWindow:new({
+        Id = "idTitleHeader",
+        HAlign = "stretch",
+        VAlign = "top",
+        LayoutMethod = "HList",
+        LayoutHSpacing = 4,
+        MinHeight = PANEL_HEADER_HEIGHT,
+        MaxHeight = PANEL_HEADER_HEIGHT,
+        Background = TRANSPARENT_BACKGROUND,
+        FocusedBackground = TRANSPARENT_BACKGROUND,
+        DisabledBackground = TRANSPARENT_BACKGROUND,
+        HandleMouse = true,
+        ChildrenHandleMouse = true,
+    }, content_panel)
+    AttributeInspectorControls.idTitleHeader = header
+
+    function header:OnMouseButtonDown(pt, button)
+        return ForwardDragFromChild(self, pt, button)
+    end
+
+    function header:OnMousePos(pt)
+        return ForwardDragMoveFromChild(self, pt)
+    end
+
+    function header:OnMouseButtonUp(pt, button)
+        return ForwardDragStopFromChild(self, pt, button)
+    end
+
+    function header:OnMouseWheelForward()
+        return ForwardWheelForwardFromChild(self)
+    end
+
+    function header:OnMouseWheelBack()
+        return ForwardWheelBackFromChild(self)
+    end
+
+    local title = XLabel:new({
         Id = "idTitle",
         Text = "Attribute Inspector  (Selected: 0)",
         Translate = false,
         TextStyle = "ConsoleLog",
-        TextColor = RGB(255, 255, 255),
-        HAlign = "stretch",
+        TextColor = PANEL_TEXT_COLOR,
+        RolloverTextColor = PANEL_TEXT_COLOR,
+        DisabledTextColor = PANEL_TEXT_COLOR,
+        DisabledRolloverTextColor = PANEL_TEXT_COLOR,
+        HAlign = "left",
         VAlign = "top",
-    }, self)
+        MinWidth = CONTENT_TITLE_MIN_WIDTH,
+        MaxWidth = CONTENT_TITLE_MAX_WIDTH,
+        MinHeight = PANEL_HEADER_HEIGHT,
+        MaxHeight = PANEL_HEADER_HEIGHT,
+        HandleMouse = true,
+    }, header)
+    AttributeInspectorControls.idTitle = title
+    LockControlTextColor(title)
 
-    self.idBody = XText:new({
-        Id = "idBody",
-        Text = "",
+    function title:OnMouseButtonDown(pt, button)
+        return ForwardDragFromChild(self, pt, button)
+    end
+
+    function title:OnMousePos(pt)
+        return ForwardDragMoveFromChild(self, pt)
+    end
+
+    function title:OnMouseButtonUp(pt, button)
+        return ForwardDragStopFromChild(self, pt, button)
+    end
+
+    function title:OnMouseWheelForward()
+        return ForwardWheelForwardFromChild(self)
+    end
+
+    function title:OnMouseWheelBack()
+        return ForwardWheelBackFromChild(self)
+    end
+
+    local minimize_button = XTextButton:new({
+        Id = "idMinimizeButton",
+        Text = "-",
         Translate = false,
         TextStyle = "ConsoleLog",
-        TextColor = RGB(255, 255, 255),
-        HAlign = "stretch",
+        TextColor = PANEL_TEXT_COLOR,
+        RolloverTextColor = PANEL_TEXT_COLOR,
+        DisabledTextColor = PANEL_TEXT_COLOR,
+        DisabledRolloverTextColor = PANEL_TEXT_COLOR,
+        HAlign = "right",
         VAlign = "top",
-        WordWrap = true,
-        MinHeight = 220,
-        MaxHeight = 500,
-        UseClipBox = true,
-    }, self)
+        MinWidth = MINIMIZE_BUTTON_WIDTH,
+        MaxWidth = MINIMIZE_BUTTON_WIDTH,
+        MinHeight = PANEL_HEADER_HEIGHT,
+        MaxHeight = PANEL_HEADER_HEIGHT,
+    }, header)
+    AttributeInspectorControls.idMinimizeButton = minimize_button
+    LockControlTextColor(minimize_button)
+    SetControlColor(minimize_button, "SetBackground", GROUP_BUTTON_INACTIVE_BACKGROUND)
+    SetControlColor(minimize_button, "SetRolloverBackground", GROUP_BUTTON_ROLLOVER_BACKGROUND)
+    SetControlColor(minimize_button, "SetPressedBackground", GROUP_BUTTON_PRESSED_BACKGROUND)
 
-    self.idDeleteButton = XTextButton:new({
+    function minimize_button:OnPress()
+        local panel = InspectorPanelFromControl(self)
+
+        if panel and type(ReadField(panel, "SetMinimized")) == "function" then
+            panel:SetMinimized(true)
+        end
+    end
+
+    function minimize_button:OnMouseWheelForward()
+        return ForwardWheelForwardFromChild(self)
+    end
+
+    function minimize_button:OnMouseWheelBack()
+        return ForwardWheelBackFromChild(self)
+    end
+
+    local close_button = XTextButton:new({
+        Id = "idCloseButton",
+        Text = "X",
+        Translate = false,
+        TextStyle = "ConsoleLog",
+        TextColor = PANEL_TEXT_COLOR,
+        RolloverTextColor = PANEL_TEXT_COLOR,
+        DisabledTextColor = PANEL_TEXT_COLOR,
+        DisabledRolloverTextColor = PANEL_TEXT_COLOR,
+        HAlign = "right",
+        VAlign = "top",
+        MinWidth = CLOSE_BUTTON_WIDTH,
+        MaxWidth = CLOSE_BUTTON_WIDTH,
+        MinHeight = PANEL_HEADER_HEIGHT,
+        MaxHeight = PANEL_HEADER_HEIGHT,
+    }, header)
+    AttributeInspectorControls.idCloseButton = close_button
+    LockControlTextColor(close_button)
+    SetControlColor(close_button, "SetBackground", GROUP_BUTTON_INACTIVE_BACKGROUND)
+    SetControlColor(close_button, "SetRolloverBackground", GROUP_BUTTON_ROLLOVER_BACKGROUND)
+    SetControlColor(close_button, "SetPressedBackground", GROUP_BUTTON_PRESSED_BACKGROUND)
+
+    function close_button:OnPress()
+        AttributeInspector_ClosePanel()
+    end
+
+    function close_button:OnMouseWheelForward()
+        return ForwardWheelForwardFromChild(self)
+    end
+
+    function close_button:OnMouseWheelBack()
+        return ForwardWheelBackFromChild(self)
+    end
+
+    if not CreateScrollableBody(content_panel) then
+        CreatePlainBody(content_panel)
+    end
+
+    local delete_button = XTextButton:new({
         Id = "idDeleteButton",
         Text = "Delete Selected Objects",
         Translate = false,
         TextStyle = "ConsoleLog",
-        TextColor = RGB(255, 255, 255),
+        TextColor = PANEL_TEXT_COLOR,
+        RolloverTextColor = PANEL_TEXT_COLOR,
+        DisabledTextColor = PANEL_TEXT_COLOR,
+        DisabledRolloverTextColor = PANEL_TEXT_COLOR,
         HAlign = "left",
         VAlign = "top",
         MinWidth = 260,
         MaxWidth = 420,
         Visible = false,
-    }, self)
+    }, content_panel)
+    AttributeInspectorControls.idDeleteButton = delete_button
+    LockControlTextColor(delete_button)
 
-    function self.idDeleteButton:OnPress()
+    function delete_button:OnPress()
         AttributeInspector_DeleteCurrentObject()
     end
+
+    function delete_button:OnMouseWheelForward()
+        return ForwardWheelForwardFromChild(self)
+    end
+
+    function delete_button:OnMouseWheelBack()
+        return ForwardWheelBackFromChild(self)
+    end
+
+    UpdateGroupButtons()
 
     if self.CreateThread then
         self:CreateThread(POLL_THREAD, function(dialog)
@@ -1597,14 +4495,38 @@ function AttributeInspector_EnsurePanel()
         return
     end
 
-    pcall(function()
-        AttributeInspectorDialog = AttributeInspectorPanel:new({
+    local created_panel = false
+    local create_ok, create_err = pcall(function()
+        created_panel = AttributeInspectorPanel:new({
             Id = PANEL_ID,
             ZOrder = PANEL_Z_ORDER,
         }, parent)
+
+        AttributeInspectorDialog = created_panel
+
+        if WindowState(created_panel) == "new"
+            and type(ReadField(created_panel, "Open")) == "function"
+        then
+            created_panel:Open()
+        end
     end)
 
-    pcall(AttributeInspector_UpdatePanel)
+    if create_ok ~= true then
+        DebugLog("UI", "Panel creation failed", {
+            error = create_err,
+        })
+        AttributeInspectorDialog = false
+        AttributeInspectorControls = {}
+        return
+    end
+
+    local update_ok, update_err = pcall(AttributeInspector_UpdatePanel)
+
+    if update_ok ~= true then
+        DebugLog("UI", "Initial panel update failed", {
+            error = update_err,
+        })
+    end
 end
 
 -- Close the inspector panel manually from Lua/debug sessions.
@@ -1613,15 +4535,50 @@ function AttributeInspector_ClosePanel()
         return
     end
 
-    pcall(function()
-        if AttributeInspectorDialog.Close then
-            AttributeInspectorDialog:Close()
-        elseif AttributeInspectorDialog.Delete then
-            AttributeInspectorDialog:Delete()
-        end
+    local panel = AttributeInspectorDialog
+    local state = WindowState(panel)
+    local ok = true
+    local err = false
 
+    if state == "open" or state == "closing" then
+        local close = ReadField(panel, "Close")
+
+        if type(close) == "function" then
+            ok, err = pcall(function()
+                close(panel)
+            end)
+        end
+    elseif state == "new" then
+        local delete = ReadField(panel, "delete")
+
+        if type(delete) == "function" then
+            ok, err = pcall(function()
+                delete(panel)
+            end)
+        else
+            ok = false
+            err = "delete_unavailable"
+        end
+    else
+        DebugLog("UI", "Panel close skipped", {
+            state = state,
+        })
+    end
+
+    if ok ~= true then
+        DebugLog("UI", "Panel close failed", {
+            state = state,
+            error = err,
+        })
+        return
+    end
+
+    if AttributeInspectorDialog == panel then
         AttributeInspectorDialog = false
-    end)
+    end
+
+    AttributeInspectorControls = {}
+    AttributeInspectorLastBodyText = false
 end
 
 -- Ensure the panel exists, then refresh its contents.

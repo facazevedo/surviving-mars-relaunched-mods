@@ -4,7 +4,7 @@ return PlaceObj('ModDef', {
 	'short_description', "Shows selected object attributes in a compact inspector panel.",
 	'id', "AttributeInspector",
 	'author', "fredware",
-	'version', 1,
+	'version', 13,
 	'lua_revision', 350453,
 	'saved_with_revision', 380799,
 	'code', {
