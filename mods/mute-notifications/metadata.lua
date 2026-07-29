@@ -1,12 +1,12 @@
 return PlaceObj('ModDef', {
 	'title', "Mute Notifications",
-	'description', "Selectively mute specific repeated Mission Control voice notifications (e.g. building/shuttle/drone spam) without lowering voice volume and without hiding any visual notifications. Adds 'Configure muted voice notifications...' under Game Options -> Audio, opening a searchable panel with a mute checkbox and a play/preview button per voiced notification.",
+	'description', "Selectively mute Mission Control alerts, HUD voices, tutorials, and scenario or mystery narration without lowering voice volume and without hiding any visual notifications. Adds 'Configure muted voice notifications...' under Game Options -> Audio, opening a searchable panel with a mute checkbox and a play/preview button for all verified recorded lines.",
 	'short_description', "Mute selected notifications",
 	'image', "Mod/MuteNotifications/Images/final_composed.jpg",
-	'last_changes', "Catalog: Comment selected POI and tutorial voices.",
+	'last_changes', "Catalog: Add every verified HUD, gameplay, and scenario voice for 464 unique mute choices.",
 	'id', "MuteNotifications",
 	'author', "fredware",
-	'version', 46,
+	'version', 47,
 	'lua_revision', 350453,
 	'saved_with_revision', 392284,
 	'code', {

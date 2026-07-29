@@ -8,7 +8,7 @@ MN_Config = {
 	MOD_DISPLAY_NAME = "Mute Notifications",
 
 	-- Canonical behaviour version (separate from metadata.lua mod 'version').
-	VERSION = "0.6.34",
+	VERSION = "0.7.0",
 
 	-- Feature flags --------------------------------------------------------
 	ENABLE_MOD = true,            -- master switch for voice suppression
@@ -189,11 +189,79 @@ MN_ExcludedVoiceIds = {
 	Tutorial2_Popup6_RCRover = true, -- duplicate "Commander, one other thing."; keep Tutorial2_Popup13_1_Research2
 	AllMilestonesCompleted = true, -- Play preview is silent; keep commented in MN_CustomNames for reference
 	ColonyViabilityExit_Delay_LastArk = true, -- duplicate "This will go down in history."; keep ColonyViabilityExit_Delay
+	ColonyViabilityExit_MartianBorn_LastArk = true, -- duplicate Martian-born line; keep ColonyViabilityExit_MartianBorn
 	ToxicRains = true,    -- duplicate Toxic Rain alert; keep DisasterToxicRains
 	ToxicRains2 = true,   -- duplicate Toxic Rain alert; keep DisasterToxicRains
 }
 MN_ExcludedVoiceGroups = {
 	Challenge = true,   -- challenge popups have voiced_text but no recorded voice audio
+}
+
+-- Literal QueueVoice/PlayVoicedText calls that do not have a discoverable preset.
+-- The translation id is required both for localized display and accurate preview.
+MN_AdditionalVoices = {
+	{ id = "Direct:AssemblySessionOpen", translation_id = 798844974010, voiced_text = "Assembly session open", group = "Politics" },
+	{ id = "Direct:BuildingDestroyed", translation_id = 900050882412, voiced_text = "Building destroyed", group = "Building" },
+	{ id = "Direct:CouncilSessionOpen", translation_id = 772603092668, voiced_text = "Council session open", group = "Politics" },
+	{ id = "Direct:DroneDestroyed", translation_id = 351249859666, voiced_text = "Drone destroyed", group = "Drone" },
+	{ id = "Direct:FactionPromiseBroken", translation_id = 601655654776, voiced_text = "Faction promise broken", group = "Politics" },
+	{ id = "Direct:FactionPromiseKept", translation_id = 484102048919, voiced_text = "Faction promise kept", group = "Politics" },
+	{ id = "Direct:NewFactionOpportunity", translation_id = 611198153779, voiced_text = "New Faction opportunity", group = "Politics" },
+	{ id = "Direct:PoliticalCrisisImminent", translation_id = 889796591446, voiced_text = "Political crisis imminent", group = "Politics" },
+	{ id = "Direct:RoverDestroyed", translation_id = 935434970603, voiced_text = "Rover destroyed", group = "Building" },
+	{ id = "Direct:VoteFailed", translation_id = 167929830600, voiced_text = "Vote failed", group = "Politics" },
+	{ id = "Direct:VotePassed", translation_id = 947390378217, voiced_text = "Vote passed", group = "Politics" },
+	{ id = "Direct:DomeFracture", translation_id = 917824125764, voiced_text = "Warning! Dome fracture", group = "Building" },
+	{ id = "Direct:FoodShortage", translation_id = 7070, voiced_text = "Warning! Food shortage", group = "Colonist" },
+}
+
+-- Translation ids from Data/Scenario whose matching <id>.opus was verified in
+-- Local/Voices/English.fpk. Runtime discovery admits only this set, excluding
+-- silent voiced_text declarations and keeping the panel free of dead Play rows.
+MN_RecordedScenarioVoiceIds = {
+	[7156] = true, [7157] = true, [7158] = true, [7159] = true, [7160] = true, [7161] = true,
+	[7162] = true, [7163] = true, [7164] = true, [7165] = true, [7166] = true, [7167] = true,
+	[7168] = true, [7169] = true, [7170] = true, [7171] = true, [7172] = true, [7173] = true,
+	[7174] = true, [7175] = true, [7176] = true, [7177] = true, [7178] = true, [7179] = true,
+	[7180] = true, [7181] = true, [7182] = true, [7183] = true, [7184] = true, [7186] = true,
+	[7187] = true, [7188] = true, [7189] = true, [7190] = true, [7192] = true, [7193] = true,
+	[7194] = true, [7195] = true, [7196] = true, [7198] = true, [7201] = true, [7202] = true,
+	[7203] = true, [7204] = true, [7205] = true, [7206] = true, [7207] = true, [7208] = true,
+	[7209] = true, [7210] = true, [7211] = true, [7212] = true, [7213] = true, [7214] = true,
+	[7215] = true, [7216] = true, [7217] = true, [7218] = true, [7219] = true, [7220] = true,
+	[7221] = true, [7222] = true, [7223] = true, [7224] = true, [7225] = true, [7226] = true,
+	[7227] = true, [7228] = true, [7229] = true, [7230] = true, [7231] = true, [7232] = true,
+	[7233] = true, [7234] = true, [7235] = true, [7236] = true, [7237] = true, [7238] = true,
+	[7239] = true, [7240] = true, [7241] = true, [7242] = true, [7243] = true, [7244] = true,
+	[7245] = true, [7246] = true, [7247] = true, [7248] = true, [7249] = true, [7250] = true,
+	[7251] = true, [7252] = true, [7253] = true, [7254] = true, [7255] = true, [7256] = true,
+	[7257] = true, [7258] = true, [7259] = true, [7260] = true, [7261] = true, [7264] = true,
+	[7265] = true, [7266] = true, [7269] = true, [7270] = true, [7272] = true, [7273] = true,
+	[7274] = true, [7275] = true, [7276] = true, [7278] = true, [7282] = true, [7284] = true,
+	[7286] = true, [7288] = true, [7290] = true, [7291] = true, [7448] = true, [7449] = true,
+	[7450] = true, [7451] = true, [7452] = true, [7453] = true, [7454] = true, [7455] = true,
+	[7456] = true, [7457] = true, [7458] = true, [7459] = true, [7460] = true, [7461] = true,
+	[7462] = true, [7463] = true, [7464] = true, [7465] = true, [7466] = true, [7467] = true,
+	[7468] = true, [7469] = true, [7470] = true, [7471] = true, [7472] = true, [7473] = true,
+	[7474] = true, [7475] = true, [7476] = true, [7477] = true, [7478] = true, [7479] = true,
+	[7480] = true, [7481] = true, [7482] = true, [7483] = true, [7484] = true, [7988] = true,
+	[7989] = true, [7990] = true, [7991] = true, [7992] = true, [7993] = true, [7994] = true,
+	[7995] = true, [7996] = true, [7997] = true, [7998] = true, [8159] = true, [8164] = true,
+	[8169] = true, [8173] = true, [8178] = true, [8184] = true, [8189] = true, [8193] = true,
+	[8198] = true, [8202] = true, [8207] = true, [8212] = true, [8216] = true, [8221] = true,
+	[8225] = true, [8229] = true, [8233] = true, [8237] = true, [8243] = true, [8248] = true,
+	[8256] = true, [8264] = true, [8277] = true, [8281] = true, [8285] = true, [8290] = true,
+	[8294] = true, [8297] = true, [8301] = true, [8305] = true, [8309] = true, [8312] = true,
+	[8320] = true, [8324] = true, [8328] = true, [8332] = true, [8336] = true, [8340] = true,
+	[8345] = true, [8352] = true, [8360] = true, [8365] = true, [8370] = true, [8379] = true,
+	[8388] = true, [8397] = true, [8402] = true, [8407] = true, [8412] = true, [8417] = true,
+	[8426] = true, [8430] = true, [8434] = true, [8443] = true, [9439] = true, [9444] = true,
+	[9449] = true, [9454] = true, [9458] = true, [9463] = true, [9467] = true, [9472] = true,
+	[9477] = true, [9481] = true, [9487] = true, [9492] = true, [9497] = true, [9503] = true,
+	[9507] = true, [9512] = true, [9517] = true, [9522] = true, [9527] = true, [9532] = true,
+	[9537] = true, [9542] = true, [9546] = true, [9552] = true, [9557] = true, [9561] = true,
+	[9566] = true, [9570] = true, [9575] = true, [9580] = true, [9585] = true, [9590] = true,
+	[9593] = true, [9598] = true,
 }
 
 MN_CustomNames = {
@@ -276,8 +344,8 @@ MN_CustomNames = {
 	["Our contribution towards the scientific advancement of humankind will be forever remembered. The Evaluation Day report shows accomplishments beyond even our wildest expectations."] = "Mission Evaluation: New Dawn",
 	["We have to admit that we failed to accomplish one of the main goals set before our mission. Sadly, we underestimated the difficulties of sustaining a large population on the Red Planet."] = "Mission Evaluation: The Exodus",
 	["As the Evaluation Day dawns upon us we can clearly say that the mission to Mars was a success."] = "Mission Evaluation: The Exodus",
-	["extremely successful"] = "Mission Evaluation: The Exodus",
-	["Humanity as a multi-planetary species"] = "Mission Evaluation: The Exodus",
+	["Congratulations! Everyone at Mission Control rejoices as the Colony has been marked as \"extremely successful\" in the Evaluation Report."] = "Mission Evaluation: The Exodus",
+	['Scientists and visionaries have promoted the idea of "Humanity as a multi-planetary species" as the only way to prevent a possible mass extinction.'] = "Mission Evaluation: The Exodus",
 	["The Mission Evaluation report confirms what we knew - the target goals were far off from the very beginning."] = "Mission Evaluation: The Final Frontier",
 	["We are all descendants of those who dared to look beyond the nice, cozy valley they inhabited and enter a world full of mystery and wonder. "] = "Mission Evaluation: The Final Frontier",
 	["The final Mission Evaluation report concludes that the Colony has scored a significant progress in the exploration of the Red Planet."] = "Mission Evaluation: The Final Frontier",
@@ -306,9 +374,10 @@ MN_CustomNames = {
 	["Our Explorer just stumbled upon something fascinating."] = "Our Explorer just stumbled upon something fascinating.",
 	["Things just took a turn for the weird."] = "Things just took a turn for the weird.",
 	["What just transpired has left us speechless."] = "What just transpired has left us speechless.",
-	["In a display reminiscent to formation flying shows back on Earth, special shuttles flew wave after wave in and out of the water vapor clouds above our colony.\\n\\n"] = "Cloud Seeding",
-	["The beauty of a space mirror can give pause to even the most seasoned astro-engineer. \\n\\n"] = "Launch Space Mirror",
-	["The warheads detonated in a magnificent display of light, brighter than a thousand suns.  We watched in awe from the safety of our labs.\\n\\n"] = "Melt the Polar Caps",
+	-- These three POI declarations have no corresponding English voice recording.
+	-- ["In a display reminiscent to formation flying shows back on Earth, special shuttles flew wave after wave in and out of the water vapor clouds above our colony.\n\n"] = "Cloud Seeding",
+	-- ["The beauty of a space mirror can give pause to even the most seasoned astro-engineer. \n\n"] = "Launch Space Mirror",
+	-- ["The warheads detonated in a magnificent display of light, brighter than a thousand suns.  We watched in awe from the safety of our labs.\n\n"] = "Melt the Polar Caps",
 	["Good job! However we need more than just Metals. Fortunately we can call a resupply Rocket from Earth."] = "Advanced Resources and Resupply",
 	["Well done! Now it's time to use our fully operational RC Explorer to analyze the Anomaly."] = "Anomalies",
 	["From this screen you can inspect all available applicants and determine which ones will travel to the Colony."] = "Applicants Filter",
@@ -385,7 +454,7 @@ MN_CustomNames = {
 	["Welcome to Mars!"] = "Welcome to Mars, Commander!",
 	["This will go down in history."] = "The Door Towards the Stars",
 	-- Inactive/commented entries; not shown in the panel while commented out.
-	--["There are Earthsick Colonists"] = "Earthsick Colonists",
+	["There are Earthsick Colonists"] = "Earthsick Colonists",
 	-- ["Congratulations! You have successfully completed all the goals your sponsor had set for you to accomplish on Mars. "] = "Mission Evaluation",
 	-- ["Dear shareholders, dear board directors! Let's applaud the Commander, whose name has become a guarantee for reliability, ambition and prosperity! A person who made our shared goals of profit and growth a paramount!"] = "Mission Evaluation",
 	-- ["Commander, your name will top the lists of humanity's heroes for ages - probably forever. We salute you!"] = "Mission Evaluation",
@@ -398,7 +467,7 @@ MN_CustomNames = {
 	-- ["Thank you for completing your mission goals, Commander. Once again your submission documentation is up to par and we enjoyed reading through it. The team at Paradox Interactive HQ is grateful for your patience and determination."] = "Mission Evaluation",
 	-- ["Commander! You achieved all mission goals, regardless of the adversities you faced on Mars! A true pioneer - well done!"] = "Mission Evaluation",
 	-- ["Congratulations Commander! You have achieved that which the cynics said cannot be done by a non-governmental entity - and yet here we are."] = "Mission Evaluation",
-	-- ["Commander, one other thing."] = "Commander, one other thing.",
+	["Commander, one other thing."] = "Commander, one other thing.",
 	-- ["The capturing of Ice Asteroids has been successfully completed!"] = "Capture Ice Asteroids",
 	-- ["We have succeeded in capturing and diverting meteors towards our general vicinity in a gambit to bring precious resources and even scientific insight withing our reach."] = "Capture Meteors",
 	-- ["The remote scientific outpost is set and has started transmitting intriguing data from the Red Planet."] = "Contract Exploration Access",
@@ -408,8 +477,8 @@ MN_CustomNames = {
 	-- ["Three, two, one... a collective gasp and then cheers. The Project was successful."] = "Seed Vegetation",
 	-- ["Our very own SETI Satellite has been delivered and launched into Martian orbit."] = "SETI Satellite",
 	-- ["Surviving Mars has been recently updated. You can check the full patch notes online, but here are a few highlights:"] = "New Update",
-	-- ["For the first time, a human has been born on Mars. It's truly a unique miracle."] = "The Door Towards the Stars", -- duplicate; the "This will go down in history." copy is the working version.
-	-- ["Let's set up a small expand some distance away from the main base."] = "RC Transport - Transport Routes", -- duplicate; the "Nice work!" OnScreenHint copy is the working version.
+	["For the first time, a human has been born on Mars. It's truly a unique miracle."] = "The Door Towards the Stars",
+	["Let's set up a small expand some distance away from the main base."] = "RC Transport - Transport Routes",
 	-- ["Good job!"] = "Passages", -- duplicate; the "Good Job!" Sensor Tower copy is the working version.
 	-- ["Nice Work!"] = "Upgrade Extractor", -- duplicate; the "Nice work!" RC Transport copy is the working version.
 	-- ["In the beginning, it was just a dream - setting foot on another planet, surviving it, building a new future for humanity."] = "A dream fulfilled", -- Play preview is silent.
@@ -420,7 +489,7 @@ MN_CustomNames = {
 	--   * COMMENT OUT (or delete) a line to REMOVE that item from the panel.
 	--   * An empty value ("") keeps the item but uses the game's own title.
 	-- Keys are the spoken (English) line and must not be changed; they are how each
-	-- entry is matched. When this table is non-empty it acts as a whitelist: only the
-	-- listed (uncommented) lines are shown. Regenerate the full current list with
+	-- original preset entry is matched. HUD, direct, and verified scenario sources
+	-- are always shown. Regenerate the full current list with
 	-- MN_ExportCustomNames() in the in-game Lua console.
 }

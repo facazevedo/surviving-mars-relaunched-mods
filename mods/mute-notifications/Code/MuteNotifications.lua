@@ -75,6 +75,12 @@ function OnMsg.ClassesBuilt()
 	MN_Lifecycle.OnClassesReady("ClassesBuilt")
 end
 
+-- Scenarios is populated by the game's DataLoaded handlers. Rebuild here so the
+-- verified scenario voices are already present when Audio options first opens.
+function OnMsg.DataLoaded()
+	MN_Lifecycle.OnClassesReady("DataLoaded")
+end
+
 function OnMsg.CityStart()
 	MN_Lifecycle.OnClassesReady("CityStart")
 end

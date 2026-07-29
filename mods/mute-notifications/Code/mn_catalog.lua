@@ -4,7 +4,7 @@
 -- builds a searchable catalog. Also owns default-spam matching and the one-time
 -- application of default mutes.
 
-local MN_CATALOG_SCHEMA_VERSION = 7
+local MN_CATALOG_SCHEMA_VERSION = 8
 local MN_REPEATED_CATEGORY = "Repeated"
 
 local function MN_CurrentConfigVersion()
@@ -17,6 +17,7 @@ MN_Catalog.by_id = MN_Catalog.by_id or false       -- id -> entry
 MN_Catalog.built = MN_Catalog.built or false
 MN_Catalog.schema_version = MN_Catalog.schema_version or 0
 MN_Catalog.config_version = MN_Catalog.config_version or false
+MN_Catalog.scenarios_included = MN_Catalog.scenarios_included or false
 
 ----- Text helpers --------------------------------------------------------------
 
@@ -69,8 +70,8 @@ function MN_Catalog.IsGroupProtected(group)
 	return group ~= nil and MN_ProtectedVoiceGroups[group] == true
 end
 
--- When MN_CustomNames has any entries it acts as a visibility whitelist: only
--- listed (uncommented) lines are shown in the panel.
+-- MN_CustomNames is the visibility whitelist for the original preset families.
+-- Verified HUD, direct and scenario entries explicitly opt in during discovery.
 function MN_Catalog.CustomNamesActive()
 	local c = rawget(_G, "MN_CustomNames")
 	return type(c) == "table" and next(c) ~= nil
@@ -209,7 +210,10 @@ function MN_Catalog.Build(reason)
 	local presets = rawget(_G, "NotificationPresets")
 	local popups = rawget(_G, "PopupNotificationPresets")
 	local hints = rawget(_G, "OnScreenHintPresets")
-	if type(presets) ~= "table" and type(popups) ~= "table" and type(hints) ~= "table" then
+	local hud = rawget(_G, "HUDNotifications")
+	local scenarios = rawget(_G, "Scenarios")
+	if type(presets) ~= "table" and type(popups) ~= "table" and type(hints) ~= "table"
+		and type(hud) ~= "table" and type(scenarios) ~= "table" then
 		MN_Debug.Warn("Catalog", "No notification preset maps available; cannot build catalog", { reason = reason })
 		return 0
 	end
@@ -217,8 +221,70 @@ function MN_Catalog.Build(reason)
 	local entries = {}
 	local by_id = {}
 
-	-- Discover every preset in a global map that carries a (non-empty) voiced
-	-- line. Two engine systems voice notifications:
+	-- Discover every preset or synthetic source that carries a non-empty voiced
+	-- line. The game routes all sources below through QueueVoice or PlayVoicedText.
+	local function AddEntry(id, preset, opts)
+		if type(preset) ~= "table" or type(id) ~= "string" then return false end
+		local entry_id = (opts.id_prefix or "") .. id
+		if by_id[entry_id] then return false end
+
+		local voiced = preset[opts.voiced_field]
+		local voiced_str = MN_Catalog.Translate(voiced)
+		local group = preset.group or opts.default_group
+		local excluded = MN_ExcludedVoiceIds[id] == true or MN_ExcludedVoiceGroups[group] == true
+		local text_key = MN_Catalog.NormalizeText(voiced_str)
+		if voiced == nil or voiced == false or voiced_str == "" or excluded then return false end
+
+		local rule_key, matched_on, matched_value = MN_Catalog.MatchDefaultRule(id, text_key)
+		local protected = MN_Catalog.IsGroupProtected(group)
+		local title_src = preset[opts.title_field]
+			or (opts.alt_title_field and preset[opts.alt_title_field]) or id
+		local game_title = MN_Catalog.Translate(title_src)
+		local display_title = game_title
+		-- MN_CustomNames remains the editable whitelist for the original preset
+		-- families. Verified HUD/direct/scenario sources opt in with force_visible.
+		local custom = rawget(_G, "MN_CustomNames")
+		local in_custom_list = opts.force_visible == true
+		if type(custom) == "table" and custom[voiced_str] ~= nil then
+			in_custom_list = true
+			local cn = custom[voiced_str]
+			if type(cn) == "string" and cn ~= "" then display_title = cn end
+		end
+		local categories = MN_Catalog.RuleCategories(rule_key)
+		local category_lookup = MN_Catalog.CategoryLookup(categories)
+		if type(opts.categories) == "table" then
+			for _, label in ipairs(opts.categories) do
+				MN_AddCategoryLabel(categories, category_lookup, label)
+			end
+		end
+		local entry = {
+			id = entry_id,
+			preset_id = id,
+			preset = preset,
+			group = group,
+			categories = categories,
+			category_lookup = category_lookup,
+			title = display_title,
+			game_title = game_title,
+			item_text = MN_Catalog.CleanDisplayText(MN_Catalog.Translate(preset.ItemText or preset.item_text)),
+			in_custom_list = in_custom_list,
+			text = MN_Catalog.Translate(preset.Text or preset.text),
+			voiced_text = voiced_str,
+			voiced_T = voiced,            -- raw T, used for accurate preview playback
+			voiced_text_key = text_key,
+			voice_actor = preset[opts.actor_field] or "narrator",
+			source = opts.source,
+			default_rule = rule_key,
+			default_matched_on = matched_on,
+			default_matched_value = matched_value,
+			mute_by_default = (rule_key ~= nil) and (not protected),
+			protected = protected,
+		}
+		entries[#entries + 1] = entry
+		by_id[entry_id] = entry
+		return true
+	end
+
 	--   * NotificationPreset  (on-screen notification cards) - field VoicedText,
 	--     played via QueueVoice -> suppressed by notification id.
 	--   * PopupNotificationPreset (full popups: Welcome to Mars, tutorials, system,
@@ -227,55 +293,7 @@ function MN_Catalog.Build(reason)
 	local function AddFromMap(map, opts)
 		if type(map) ~= "table" then return end
 		for id, preset in pairs(map) do
-			if type(preset) == "table" and type(id) == "string" and not by_id[id] then
-				local voiced = preset[opts.voiced_field]
-				local voiced_str = MN_Catalog.Translate(voiced)
-				local group = preset.group or opts.default_group
-				local excluded = MN_ExcludedVoiceIds[id] == true or MN_ExcludedVoiceGroups[group] == true
-				local text_key = MN_Catalog.NormalizeText(voiced_str)
-				if voiced ~= nil and voiced ~= false and voiced_str ~= "" and not excluded then
-					local rule_key, matched_on, matched_value = MN_Catalog.MatchDefaultRule(id, text_key)
-					local protected = MN_Catalog.IsGroupProtected(group)
-					local title_src = preset[opts.title_field]
-						or (opts.alt_title_field and preset[opts.alt_title_field]) or id
-					local game_title = MN_Catalog.Translate(title_src)
-					local display_title = game_title
-					-- Custom display-name override (mn_custom_names.lua), keyed by the
-					-- spoken line. Empty/missing falls back to the game's own title.
-					local custom = rawget(_G, "MN_CustomNames")
-					local in_custom_list = false
-					if type(custom) == "table" and custom[voiced_str] ~= nil then
-						in_custom_list = true
-						local cn = custom[voiced_str]
-						if type(cn) == "string" and cn ~= "" then display_title = cn end
-					end
-					local categories = MN_Catalog.RuleCategories(rule_key)
-					local entry = {
-						id = id,
-						preset = preset,
-						group = group,
-						categories = categories,
-						category_lookup = MN_Catalog.CategoryLookup(categories),
-						title = display_title,
-						game_title = game_title,
-						item_text = MN_Catalog.CleanDisplayText(MN_Catalog.Translate(preset.ItemText or preset.item_text)),
-						in_custom_list = in_custom_list,
-						text = MN_Catalog.Translate(preset.Text or preset.text),
-						voiced_text = voiced_str,
-						voiced_T = voiced,            -- raw T, used for accurate preview playback
-						voiced_text_key = text_key,
-						voice_actor = preset[opts.actor_field] or "narrator",
-						source = opts.source,
-						default_rule = rule_key,
-						default_matched_on = matched_on,
-						default_matched_value = matched_value,
-						mute_by_default = (rule_key ~= nil) and (not protected),
-						protected = protected,
-					}
-					entries[#entries + 1] = entry
-					by_id[id] = entry
-				end
-			end
+			AddEntry(id, preset, opts)
 		end
 	end
 
@@ -295,6 +313,85 @@ function MN_Catalog.Build(reason)
 		title_field = "title", alt_title_field = nil,
 		source = "OnScreenHintPreset", default_group = "Hints",
 	})
+	-- Compact HUD alerts are not NotificationPreset objects, so they are muted
+	-- through the existing normalized-text fallback.
+	AddFromMap(hud, {
+		voiced_field = "voiced_text", actor_field = "actor",
+		title_field = "text", alt_title_field = nil,
+		source = "HUDNotificationPreset", default_group = "HUD",
+		id_prefix = "HUD:", force_visible = true, categories = { "HUD" },
+	})
+
+	-- Literal gameplay calls (building destroyed, vote passed, etc.) do not live
+	-- in a preset map. Recreate their T values so previews retain the real voice id.
+	local make_t = rawget(_G, "T")
+	local direct = rawget(_G, "MN_AdditionalVoices")
+	if type(make_t) == "function" and type(direct) == "table" then
+		for _, spec in ipairs(direct) do
+			if type(spec) == "table" and type(spec.id) == "string"
+				and type(spec.translation_id) == "number" and type(spec.voiced_text) == "string" then
+				local preset = {
+					voiced_text = make_t(spec.translation_id, spec.voiced_text),
+					actor = spec.actor or "aide",
+					title = spec.title or spec.voiced_text,
+					text = spec.voiced_text,
+					group = spec.group or "System",
+				}
+				AddEntry(spec.id, preset, {
+					voiced_field = "voiced_text", actor_field = "actor",
+					title_field = "title", alt_title_field = nil,
+					source = "DirectVoice", default_group = "System",
+					force_visible = true, categories = { "System" },
+				})
+			end
+		end
+	end
+
+	-- Scenario popup actions are nested under Scenarios -> sequences -> actions.
+	-- Only ids verified in the installed English voice pack are admitted; this
+	-- deliberately excludes hundreds of StoryBit-style voiced_text fields with no
+	-- recording. The T id also provides a stable persistence id across sessions.
+	local recorded_ids = rawget(_G, "MN_RecordedScenarioVoiceIds")
+	local get_t_id = rawget(_G, "TGetID")
+	local scenario_voice_count = 0
+	if type(scenarios) == "table" and type(recorded_ids) == "table" and type(get_t_id) == "function" then
+		for _, scenario in ipairs(scenarios) do
+			if type(scenario) == "table" then
+				local scenario_id = tostring(scenario.id or "Scenario")
+				for _, sequence in ipairs(scenario) do
+					if type(sequence) == "table" then
+						for _, action in ipairs(sequence) do
+							if type(action) == "table" then
+								local voiced = action.voiced_text
+								local ok, translation_id = pcall(get_t_id, voiced)
+								if ok and translation_id and (recorded_ids[translation_id] == true
+									or recorded_ids[tonumber(translation_id)] == true) then
+									local title = action.title
+									if title == nil or title == "" then title = sequence.name or scenario_id end
+									local preset = {
+										voiced_text = voiced,
+										actor = action.actor or "narrator",
+										title = title,
+										text = action.text,
+										group = scenario_id,
+									}
+									if AddEntry(tostring(translation_id), preset, {
+										voiced_field = "voiced_text", actor_field = "actor",
+										title_field = "title", alt_title_field = nil,
+										source = "Scenario", default_group = "Scenario",
+										id_prefix = "Scenario:", force_visible = true,
+										categories = { "Scenario" },
+									}) then
+										scenario_voice_count = scenario_voice_count + 1
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
 
 	table.sort(entries, MN_SortEntries)
 	local repeated_count = MN_MarkRepeatedEntries(entries)
@@ -304,11 +401,14 @@ function MN_Catalog.Build(reason)
 	MN_Catalog.built = true
 	MN_Catalog.schema_version = MN_CATALOG_SCHEMA_VERSION
 	MN_Catalog.config_version = MN_CurrentConfigVersion()
+	MN_Catalog.scenarios_included = type(scenarios) == "table" and #scenarios > 0
+	MN_Catalog.scenario_voice_count = scenario_voice_count
 
 	MN_Debug.Info("Catalog", "Built voice-notification catalog", {
 		reason = reason,
 		count = #entries,
 		repeated_count = repeated_count,
+		scenario_voice_count = scenario_voice_count,
 		schema_version = MN_Catalog.schema_version,
 		config_version = MN_Catalog.config_version,
 	})
@@ -329,7 +429,10 @@ end
 
 function MN_Catalog.EnsureBuilt(reason)
 	if MN_Catalog.IsBuilt() and #MN_Catalog.entries > 0 then
-		return true
+		local scenarios = rawget(_G, "Scenarios")
+		if not (type(scenarios) == "table" and #scenarios > 0 and MN_Catalog.scenarios_included ~= true) then
+			return true
+		end
 	end
 	if MN_Catalog.built == true and type(MN_Catalog.entries) == "table" and #MN_Catalog.entries > 0 then
 		MN_Debug.Info("Catalog", "Rebuilding stale voice-notification catalog", {
