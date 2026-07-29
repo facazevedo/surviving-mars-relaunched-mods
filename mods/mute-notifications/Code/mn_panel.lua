@@ -105,6 +105,7 @@ local function MN_MakeButton(parent, text, on_press, opts)
 	opts = opts or {}
 	local b = XTextButton:new({
 		Translate = false,
+		UseXTextControl = opts.UseXTextControl == true,
 		TextStyle = opts.TextStyle or "ActionSmall",
 		Padding = opts.Padding or box(10, 4, 10, 4),
 		MinWidth = opts.MinWidth or 90,
@@ -611,7 +612,12 @@ function MN_Panel.Open(reason)
 	end)
 	local back_button = MN_MakeButton(footer, "Back", function()
 		MN_Panel.Close("back_button")
-	end, { Background = Col(70, 40, 40, 235), RolloverBackground = Col(100, 56, 56, 235), HAlign = "right" })
+	end, {
+		Background = Col(70, 40, 40, 235),
+		RolloverBackground = Col(100, 56, 56, 235),
+		HAlign = "right",
+		UseXTextControl = true,
+	})
 	if back_button and back_button.idLabel then
 		back_button.idLabel:SetHAlign("stretch")
 		back_button.idLabel:SetTextHAlign("center")
