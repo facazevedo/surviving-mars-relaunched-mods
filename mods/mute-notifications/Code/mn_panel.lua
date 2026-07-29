@@ -466,10 +466,10 @@ function MN_Panel.Open(reason)
 	}, root)
 
 	-- Header.
-	MN_MakeText(content, "Mute Notifications  -  select which voice lines to mute",
+	MN_MakeText(content, "Mute Notifications - visual notifications are never hidden.",
 		"PropName", { TextColor = Col(255, 255, 255, 255) })
-	MN_MakeText(content, "Checked = voice muted. Visual notifications are never hidden. Use Play to preview a line.",
-		"PropValue", { TextColor = Col(170, 190, 200, 255) })
+	-- Preserve the former instruction row as intentional breathing room.
+	XWindow:new({ MinHeight = 30, MaxHeight = 30, HandleMouse = false }, content)
 
 	-- Toolbar: search + group filter + count.
 	local toolbar = XWindow:new({
@@ -482,11 +482,14 @@ function MN_Panel.Open(reason)
 			Id = "idMNSearch",
 			Translate = false,
 			Hint = "type to filter...",
+			TextStyle = "PropValue",
 			MinWidth = 360,
 			MaxWidth = 360,
 			Background = Col(8, 10, 12, 255),
+			FocusedBackground = Col(12, 15, 18, 255),
 			BorderWidth = 1,
 			BorderColor = Col(70, 84, 90, 255),
+			FocusedBorderColor = Col(100, 118, 126, 255),
 			Padding = box(6, 4, 6, 4),
 			OnTextChanged = function(self)
 				MN_Panel.search = (type(self.GetText) == "function") and (self:GetText() or "") or ""
@@ -514,10 +517,19 @@ function MN_Panel.Open(reason)
 	MN_MakeText(toolbar, "Filter:", "PropValue", { MinWidth = 56 })
 	local XCombo = Cls("XCombo")
 	if XCombo then
-		MN_Panel.filter_control = XCombo:new({
+		local filter_combo = XCombo:new({
 			Id = "idMNGroup",
 			Translate = false,
 			ArbitraryValue = false,
+			TextStyle = "PropValue",
+			Padding = box(6, 4, 1, 4),
+			Background = Col(8, 10, 12, 255),
+			FocusedBackground = Col(12, 15, 18, 255),
+			BorderWidth = 1,
+			BorderColor = Col(70, 84, 90, 255),
+			FocusedBorderColor = Col(100, 118, 126, 255),
+			PopupBackground = Col(18, 22, 26, 255),
+			ListItemTemplate = "XComboXTextListItemDark",
 			-- MUST stay false: with RefreshItemsOnOpen=true, CloseCombo sets
 			-- self.Items=nil, destroying our Items function so the combo never opens
 			-- again. Items is a function, so it is re-evaluated on every open anyway.
@@ -535,6 +547,16 @@ function MN_Panel.Open(reason)
 				end
 			end,
 		}, toolbar)
+		MN_Panel.filter_control = filter_combo
+		-- XCombo's stock arrow button is bright blue. Restyle it to the same
+		-- charcoal palette as the panel while preserving its built-in icon.
+		local arrow = filter_combo.idButton
+		if arrow then
+			arrow:SetBackground(Col(38, 46, 52, 255))
+			arrow:SetRolloverBackground(Col(54, 68, 74, 255))
+			arrow:SetPressedBackground(Col(85, 101, 108, 255))
+			arrow:SetDisabledBackground(Col(28, 34, 38, 255))
+		end
 	else
 		MN_Panel.filter_control = MN_MakeButton(toolbar, "Filter: " .. MN_Panel.group_filter, function(self)
 			local groups = MN_FilterList()
