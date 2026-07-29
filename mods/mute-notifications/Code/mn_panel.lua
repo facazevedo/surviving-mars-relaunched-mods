@@ -13,6 +13,8 @@ MN_Panel = {
 	group_filter = "All", -- unified filter value: All / category label / game group
 	filter_control = false,
 	visible = false,    -- entries currently shown (for "visible" bulk actions)
+	pending_muted_by_id = false, -- panel-local draft; persistence changes only on Apply
+	pending_reset_all = false,
 }
 
 ----- small guarded helpers -----------------------------------------------------
@@ -130,6 +132,111 @@ local function MN_MakeButton(parent, text, on_press, opts)
 	return b
 end
 
+-- XTextButton normally uses HList, which leaves spare width to the label's
+-- right. Box centers the natural-size label in the complete button content area.
+local function MN_CenterButtonLabel(button)
+	if not button then return end
+	button:SetLayoutMethod("Box")
+	if button.idLabel then
+		button.idLabel:SetHAlign("center")
+	end
+end
+
+----- staged edits --------------------------------------------------------------
+
+function MN_Panel.BeginEditSession()
+	local pending = {}
+	if MN_Catalog.IsBuilt() and type(MN_Catalog.entries) == "table" then
+		for _, entry in ipairs(MN_Catalog.entries) do
+			pending[entry.id] = MN_Catalog.IsEntryMuted(entry) == true
+		end
+	end
+	MN_Panel.pending_muted_by_id = pending
+	MN_Panel.pending_reset_all = false
+end
+
+function MN_Panel.IsEntryMuted(entry)
+	if not entry then return false end
+	local pending = MN_Panel.pending_muted_by_id
+	if type(pending) == "table" and pending[entry.id] ~= nil then
+		return pending[entry.id] == true
+	end
+	return MN_Catalog.IsEntryMuted(entry)
+end
+
+function MN_Panel.StageEntryMuted(entry, muted)
+	if not entry then return end
+	if type(MN_Panel.pending_muted_by_id) ~= "table" then
+		MN_Panel.BeginEditSession()
+	end
+	MN_Panel.pending_muted_by_id[entry.id] = muted == true
+end
+
+function MN_Panel.StageEntriesMuted(entries, muted)
+	if type(entries) ~= "table" then return 0 end
+	local changed = 0
+	for _, entry in ipairs(entries) do
+		if MN_Panel.IsEntryMuted(entry) ~= (muted == true) then
+			MN_Panel.StageEntryMuted(entry, muted)
+			changed = changed + 1
+		end
+	end
+	return changed
+end
+
+function MN_Panel.StageResetAll()
+	if type(MN_Panel.pending_muted_by_id) ~= "table" then
+		MN_Panel.BeginEditSession()
+	end
+	if MN_Catalog.IsBuilt() and type(MN_Catalog.entries) == "table" then
+		for _, entry in ipairs(MN_Catalog.entries) do
+			MN_Panel.pending_muted_by_id[entry.id] = false
+		end
+	end
+	-- Apply will clear stale ids/text keys too, not just currently catalogued rows.
+	MN_Panel.pending_reset_all = true
+end
+
+function MN_Panel.HasPendingChanges()
+	if MN_Panel.pending_reset_all == true then return true end
+	local pending = MN_Panel.pending_muted_by_id
+	if type(pending) ~= "table" or not MN_Catalog.IsBuilt() then return false end
+	for _, entry in ipairs(MN_Catalog.entries) do
+		local desired = pending[entry.id]
+		if desired ~= nil and (desired == true) ~= MN_Catalog.IsEntryMuted(entry) then
+			return true
+		end
+	end
+	return false
+end
+
+function MN_Panel.ApplyPending()
+	local pending = MN_Panel.pending_muted_by_id
+	if type(pending) ~= "table" or not MN_Catalog.IsBuilt() then return 0 end
+	if not MN_Panel.HasPendingChanges() then return 0 end
+
+	local reset_all = MN_Panel.pending_reset_all == true
+	if reset_all then
+		MN_Persistence.ResetAll({ no_save = true, defaults_applied = true })
+	end
+
+	local changed = 0
+	for _, entry in ipairs(MN_Catalog.entries) do
+		local desired = pending[entry.id]
+		if desired == nil then desired = MN_Catalog.IsEntryMuted(entry) end
+		if MN_Catalog.IsEntryMuted(entry) ~= (desired == true) then
+			MN_Catalog.SetEntryMuted(entry, desired, { no_save = true })
+			changed = changed + 1
+		end
+	end
+	MN_Persistence.Save("panel_apply")
+	MN_Panel.BeginEditSession()
+	MN_Debug.Info("Panel", "Applied pending mute changes", {
+		changed = changed, reset_all = reset_all,
+	}, "DEBUG_UI")
+	return changed
+end
+
 ----- filtering -----------------------------------------------------------------
 
 local function MN_FilterList()
@@ -185,7 +292,7 @@ local function MN_EntryCountsInPanelTotal(entry, whitelist)
 end
 
 local function MN_ToggleLabel(entry)
-	return MN_Catalog.IsEntryMuted(entry) and "[X] Muted" or "[  ] Allowed"
+	return MN_Panel.IsEntryMuted(entry) and "[X] Muted" or "[  ] Allowed"
 end
 
 ----- row -----------------------------------------------------------------------
@@ -268,10 +375,10 @@ local function MN_BuildRow(list, entry, display_index)
 
 	-- Mute toggle (checkbox-style). Display truth is strictly by id.
 	local toggle = MN_MakeButton(row, MN_ToggleLabel(entry), function(self)
-		MN_Catalog.SetEntryMuted(entry, not MN_Catalog.IsEntryMuted(entry))
+		MN_Panel.StageEntryMuted(entry, not MN_Panel.IsEntryMuted(entry))
 		self:SetText(MN_ToggleLabel(entry))
-		MN_Debug.Info("Panel", "Toggled mute", {
-			id = entry.id, muted = MN_Catalog.IsEntryMuted(entry),
+		MN_Debug.Info("Panel", "Staged mute toggle", {
+			id = entry.id, muted = MN_Panel.IsEntryMuted(entry),
 		}, "DEBUG_UI")
 	end, { MinWidth = 130, MaxWidth = 130 })
 
@@ -360,7 +467,7 @@ function MN_Panel.Rebuild()
 			for _, e in ipairs(MN_Catalog.entries) do
 				if MN_EntryCountsInPanelTotal(e, whitelist) then
 					total = total + 1
-					if MN_Catalog.IsEntryMuted(e) then muted = muted + 1 end
+					if MN_Panel.IsEntryMuted(e) then muted = muted + 1 end
 				end
 			end
 		end
@@ -384,6 +491,7 @@ function MN_Panel.IsOpen()
 end
 
 function MN_Panel.Close(reason)
+	local discarded = MN_Panel.HasPendingChanges()
 	if WinValid(MN_Panel.root) then
 		if type(MN_Panel.root.SetModal) == "function" then
 			pcall(function() MN_Panel.root:SetModal(false) end)
@@ -395,7 +503,9 @@ function MN_Panel.Close(reason)
 	MN_Panel.count_text = false
 	MN_Panel.search_edit = false
 	MN_Panel.filter_control = false
-	MN_Debug.Info("Panel", "Closed", { reason = reason }, "DEBUG_UI")
+	MN_Panel.pending_muted_by_id = false
+	MN_Panel.pending_reset_all = false
+	MN_Debug.Info("Panel", "Closed", { reason = reason, discarded = discarded }, "DEBUG_UI")
 end
 
 function MN_Panel.Open(reason)
@@ -420,6 +530,7 @@ function MN_Panel.Open(reason)
 	MN_Panel.search = ""
 	MN_Panel.group_filter = "All"
 	MN_Catalog.EnsureBuilt(reason or "panel_open")
+	MN_Panel.BeginEditSession()
 
 	-- Full-screen backdrop that blocks clicks to the screen behind.
 	-- Escape closes ONLY this panel (returns to the Audio options page).
@@ -645,14 +756,20 @@ function MN_Panel.Open(reason)
 		Padding = box(0, 6, 0, 0),
 	}, content)
 	MN_MakeButton(footer, "Mute group", function()
-		MN_Catalog.SetEntriesMuted(MN_VisibleEntries(), true, "mute_visible"); MN_Panel.Rebuild()
+		MN_Panel.StageEntriesMuted(MN_VisibleEntries(), true)
+		MN_Panel.Rebuild()
 	end)
 	MN_MakeButton(footer, "Unmute group", function()
-		MN_Catalog.SetEntriesMuted(MN_VisibleEntries(), false, "unmute_visible"); MN_Panel.Rebuild()
+		MN_Panel.StageEntriesMuted(MN_VisibleEntries(), false)
+		MN_Panel.Rebuild()
 	end)
+	local apply_button = MN_MakeButton(footer, "Apply", function()
+		MN_Panel.ApplyPending()
+		MN_Panel.Rebuild()
+	end, { Background = Col(36, 58, 44, 235), RolloverBackground = Col(50, 82, 61, 235) })
+	MN_CenterButtonLabel(apply_button)
 	MN_MakeButton(footer, "Reset", function()
-		MN_Persistence.ResetAll({ no_save = true, defaults_applied = true })
-		MN_Persistence.Save("panel_reset_all_unmuted")
+		MN_Panel.StageResetAll()
 		MN_Panel.SetSearch("")
 		MN_Panel.SetFilter("All")
 		MN_Panel.Rebuild()
@@ -661,13 +778,7 @@ function MN_Panel.Open(reason)
 		MN_Panel.Close("back_button")
 	end, { Background = Col(70, 40, 40, 235), RolloverBackground = Col(100, 56, 56, 235), HAlign = "right" })
 	if back_button then
-		-- XTextButton normally uses HList, which leaves all width above the label's
-		-- measured width on its right. Box centers the unchanged, natural-size label
-		-- in the complete button content area.
-		back_button:SetLayoutMethod("Box")
-		if back_button.idLabel then
-			back_button.idLabel:SetHAlign("center")
-		end
+		MN_CenterButtonLabel(back_button)
 
 		-- Close on mouse-down instead of relying on the normal captured mouse-up
 		-- path. Keep OnPress above for keyboard/gamepad activation.
