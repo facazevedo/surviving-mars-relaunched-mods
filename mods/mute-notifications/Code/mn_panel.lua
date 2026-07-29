@@ -612,8 +612,31 @@ function MN_Panel.Open(reason)
 	local back_button = MN_MakeButton(footer, "Back", function()
 		MN_Panel.Close("back_button")
 	end, { Background = Col(70, 40, 40, 235), RolloverBackground = Col(100, 56, 56, 235), HAlign = "right" })
-	if back_button and back_button.idLabel then
-		back_button.idLabel:SetHAlign("center")
+	if back_button then
+		-- XTextButton normally uses HList, which leaves all width above the label's
+		-- measured width on its right. Box centers the unchanged, natural-size label
+		-- in the complete button content area.
+		back_button:SetLayoutMethod("Box")
+		if back_button.idLabel then
+			back_button.idLabel:SetHAlign("center")
+		end
+
+		-- Close on mouse-down instead of relying on the normal captured mouse-up
+		-- path. Keep OnPress above for keyboard/gamepad activation.
+		back_button.OnMouseButtonDown = function(self, pt, button)
+			if button == "L" then
+				local create_thread = rawget(_G, "CreateRealTimeThread")
+				if type(create_thread) == "function" then
+					create_thread(function()
+						MN_Panel.Close("back_button_mouse")
+					end)
+				else
+					MN_Panel.Close("back_button_mouse")
+				end
+				return "break"
+			end
+			return "break"
+		end
 	end
 
 	root:Open()
