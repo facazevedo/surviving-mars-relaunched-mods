@@ -530,6 +530,7 @@ function MN_Panel.Open(reason)
 			FocusedBorderColor = Col(100, 118, 126, 255),
 			PopupBackground = Col(18, 22, 26, 255),
 			ListItemTemplate = "XComboXTextListItemDark",
+			AutoSelectAll = false,
 			-- MUST stay false: with RefreshItemsOnOpen=true, CloseCombo sets
 			-- self.Items=nil, destroying our Items function so the combo never opens
 			-- again. Items is a function, so it is re-evaluated on every open anyway.
@@ -548,6 +549,53 @@ function MN_Panel.Open(reason)
 			end,
 		}, toolbar)
 		MN_Panel.filter_control = filter_combo
+
+		-- XCombo creates an internal XEdit whose focused background defaults to
+		-- white, independently of the combo's own colors. Force every edit state
+		-- dark and remove the blue auto-selection background.
+		local field_bg = Col(8, 10, 12, 255)
+		local popup_bg = Col(18, 22, 26, 255)
+		local edit = filter_combo.idEdit
+		if edit then
+			edit:SetBackground(field_bg)
+			edit:SetFocusedBackground(field_bg)
+			edit:SetDisabledBackground(field_bg)
+			edit:SetSelectionBackground(field_bg)
+			edit:SetSelectionColor(Col(255, 255, 255, 255))
+		end
+
+		-- The stock dark item template still uses white/gray focus and rollover
+		-- colors. Restyle the popup and each concrete item after XCombo builds it.
+		local stock_open_combo = filter_combo.OpenCombo
+		filter_combo.OpenCombo = function(self, mode)
+			local popup = stock_open_combo(self, mode)
+			if not popup then return popup end
+
+			local function SetColor(win, setter, color)
+				local fn = win and win[setter]
+				if type(fn) == "function" then fn(win, color) end
+			end
+
+			SetColor(popup, "SetBackground", popup_bg)
+			SetColor(popup, "SetFocusedBackground", popup_bg)
+			SetColor(popup, "SetBorderColor", Col(70, 84, 90, 255))
+			SetColor(popup, "SetFocusedBorderColor", Col(70, 84, 90, 255))
+
+			local container = popup.idContainer
+			SetColor(container, "SetBackground", popup_bg)
+			SetColor(container, "SetFocusedBackground", popup_bg)
+			if container then
+				for _, item in ipairs(container) do
+					SetColor(item, "SetBackground", popup_bg)
+					SetColor(item, "SetFocusedBackground", popup_bg)
+					SetColor(item, "SetRolloverBackground", popup_bg)
+					SetColor(item, "SetPressedBackground", popup_bg)
+					SetColor(item, "SetDisabledBackground", popup_bg)
+				end
+			end
+			return popup
+		end
+
 		-- XCombo's stock arrow button is bright blue. Restyle it to the same
 		-- charcoal palette as the panel while preserving its built-in icon.
 		local arrow = filter_combo.idButton
