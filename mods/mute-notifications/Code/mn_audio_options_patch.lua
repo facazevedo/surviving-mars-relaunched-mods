@@ -24,6 +24,7 @@ MN_AudioPatch = {
 	group_registered = false,
 	prop_added = false,
 	bool_patch_applied = false,
+	orig_PropBool_new = false,
 	orig_PropBool_OnMouseButtonDown = false,
 	orig_PropBool_OnPropUpdate = false,
 	new_skipped = 0,     -- MN_OptionRow:new skips for non-matching properties
@@ -286,7 +287,9 @@ local function MN_RemoveLegacyGroupMember()
 	local presets = rawget(_G, "Presets")
 	local grp = presets and presets.XDef and presets.XDef["MenuProp"]
 	if type(grp) ~= "table" then
-		return false, "Presets.XDef.MenuProp unavailable"
+		APLog("Legacy MenuProp group not available yet; nothing to remove")
+		MN_AudioPatch.group_registered = false
+		return true
 	end
 	local removed = 0
 	for i = #grp, 1, -1 do
@@ -314,14 +317,44 @@ local function MN_InstallBoolRowPatch()
 	if type(PropBool) ~= "table" then
 		return false, "PropBool class unavailable"
 	end
+	local orig_new = PropBool.new
 	local orig_mouse = PropBool.OnMouseButtonDown
 	local orig_update = PropBool.OnPropUpdate
-	if type(orig_mouse) ~= "function" or type(orig_update) ~= "function" then
+	if type(orig_new) ~= "function" or type(orig_mouse) ~= "function" or type(orig_update) ~= "function" then
 		return false, "PropBool methods unavailable"
 	end
 
+	MN_AudioPatch.orig_PropBool_new = orig_new
 	MN_AudioPatch.orig_PropBool_OnMouseButtonDown = orig_mouse
 	MN_AudioPatch.orig_PropBool_OnPropUpdate = orig_update
+
+	local function ClearValueLabels(row)
+		local untranslated = rawget(_G, "Untranslated")
+		local empty = type(untranslated) == "function" and untranslated("") or ""
+		if row.idOn then
+			row.idOn:SetText(empty)
+			row.idOn:SetVisible(false)
+		end
+		if row.idOff then
+			row.idOff:SetText(empty)
+			row.idOff:SetVisible(false)
+		end
+	end
+
+	function PropBool:new(args, parent, context)
+		local row = orig_new(self, args, parent, context)
+		local pm = context and context.prop_meta
+		if row and pm and pm.id == OPT_ID then
+			ClearValueLabels(row)
+			APLog("Built-in Audio row created with empty value labels", {
+				id = pm.id,
+				editor = pm.editor,
+				has_on = row.idOn ~= nil,
+				has_off = row.idOff ~= nil,
+			})
+		end
+		return row
+	end
 
 	function PropBool:OnMouseButtonDown(pos, button)
 		local pm = self.prop_meta
@@ -339,8 +372,7 @@ local function MN_InstallBoolRowPatch()
 	function PropBool:OnPropUpdate(context, prop_meta, value)
 		orig_update(self, context, prop_meta, value)
 		if prop_meta and prop_meta.id == OPT_ID then
-			if self.idOn then self.idOn:SetVisible(false) end
-			if self.idOff then self.idOff:SetVisible(false) end
+			ClearValueLabels(self)
 			self:SetEnabled(true)
 			self:SetHandleMouse(true)
 			APLog("Built-in Audio row rendered", {
@@ -354,6 +386,7 @@ local function MN_InstallBoolRowPatch()
 
 	MN_AudioPatch.bool_patch_applied = true
 	APLog("Installed built-in PropBool Audio-row hooks", {
+		has_new = type(PropBool.new) == "function",
 		has_mouse = type(PropBool.OnMouseButtonDown) == "function",
 		has_update = type(PropBool.OnPropUpdate) == "function",
 	})

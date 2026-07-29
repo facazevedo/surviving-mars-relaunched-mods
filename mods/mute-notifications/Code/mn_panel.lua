@@ -468,8 +468,6 @@ function MN_Panel.Open(reason)
 	-- Header.
 	MN_MakeText(content, "Mute Notifications - visual notifications are never hidden.",
 		"PropName", { TextColor = Col(255, 255, 255, 255) })
-	-- Preserve the former instruction row as intentional breathing room.
-	XWindow:new({ MinHeight = 30, MaxHeight = 30, HandleMouse = false }, content)
 
 	-- Toolbar: search + group filter + count.
 	local toolbar = XWindow:new({
@@ -609,9 +607,13 @@ function MN_Panel.Open(reason)
 		MN_Panel.SetFilter("All")
 		MN_Panel.Rebuild()
 	end)
-	MN_MakeButton(footer, "Back", function()
+	local back_button = MN_MakeButton(footer, "Back", function()
 		MN_Panel.Close("back_button")
 	end, { Background = Col(70, 40, 40, 235), RolloverBackground = Col(100, 56, 56, 235), HAlign = "right" })
+	if back_button and back_button.idLabel then
+		back_button.idLabel:SetHAlign("stretch")
+		back_button.idLabel:SetTextHAlign("center")
+	end
 
 	root:Open()
 	-- Make the panel modal so the filter XCombo's popup parents to OUR window and
