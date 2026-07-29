@@ -443,13 +443,15 @@ function MN_Panel.Open(reason)
 	}, desktop)
 	MN_Panel.root = root
 
-	-- Centered content box. Sizes to its children (header + toolbar + the fixed
-	-- list field + footer), so the list never spans the whole screen.
+	-- Centered, fixed-size content box. Keep the panel dimensions stable while
+	-- searches and filters rebuild rows with differently sized text.
 	local content = XWindow:new({
 		HAlign = "center",
 		VAlign = "center",
-		MinWidth = 1100,
+		MinWidth = 1500,
 		MaxWidth = 1500,
+		MinHeight = 670,
+		MaxHeight = 670,
 		LayoutMethod = "VList",
 		LayoutVSpacing = 8,
 		Padding = box(16, 16, 16, 16),
