@@ -23,12 +23,16 @@ MN_AudioPatch = {
 	class_defined = false,
 	group_registered = false,
 	prop_added = false,
+	bool_patch_applied = false,
+	orig_PropBool_OnMouseButtonDown = false,
+	orig_PropBool_OnPropUpdate = false,
 	new_skipped = 0,     -- MN_OptionRow:new skips for non-matching properties
 	init_calls = 0,      -- MN_OptionRow:Init invocations for OUR property
 	init_matched = 0,    -- ...of which matched OUR property
 }
 
 local EDITOR = MN_Config.AUDIO_OPTION_EDITOR
+local RENDER_EDITOR = "bool"
 local OPT_ID = MN_Config.AUDIO_OPTION_ID
 local CLASS_NAME = "MN_OptionRow"
 
@@ -275,6 +279,87 @@ local function MN_RegisterGroupMember()
 	return true
 end
 
+-- Remove the legacy custom MenuProp renderer. The options template assumes each
+-- property has a matching renderer and crashes if none returns a child. The
+-- replacement path below uses the game's built-in PropBool renderer instead.
+local function MN_RemoveLegacyGroupMember()
+	local presets = rawget(_G, "Presets")
+	local grp = presets and presets.XDef and presets.XDef["MenuProp"]
+	if type(grp) ~= "table" then
+		return false, "Presets.XDef.MenuProp unavailable"
+	end
+	local removed = 0
+	for i = #grp, 1, -1 do
+		if grp[i] and grp[i].id == CLASS_NAME then
+			table.remove(grp, i)
+			removed = removed + 1
+		end
+	end
+	MN_AudioPatch.group_registered = false
+	APLog("Removed legacy custom MenuProp renderer", { removed = removed, remaining = #grp })
+	return true
+end
+
+-- Reuse the engine's proven boolean options row and intercept only this
+-- property's activation. This guarantees OptionsContentWindow receives a child
+-- for the property while keeping the row action-like (the On/Off labels are
+-- hidden after the stock renderer updates them).
+local function MN_InstallBoolRowPatch()
+	if MN_AudioPatch.bool_patch_applied == true then
+		APLog("PropBool hook already installed")
+		return true
+	end
+
+	local PropBool = rawget(_G, "PropBool")
+	if type(PropBool) ~= "table" then
+		return false, "PropBool class unavailable"
+	end
+	local orig_mouse = PropBool.OnMouseButtonDown
+	local orig_update = PropBool.OnPropUpdate
+	if type(orig_mouse) ~= "function" or type(orig_update) ~= "function" then
+		return false, "PropBool methods unavailable"
+	end
+
+	MN_AudioPatch.orig_PropBool_OnMouseButtonDown = orig_mouse
+	MN_AudioPatch.orig_PropBool_OnPropUpdate = orig_update
+
+	function PropBool:OnMouseButtonDown(pos, button)
+		local pm = self.prop_meta
+		if button == "L" and pm and pm.id == OPT_ID then
+			APLog("Built-in Audio row activated", { id = pm.id, editor = pm.editor })
+			local ok, err = pcall(MN_OpenPanel, "audio_options_row")
+			if ok ~= true then
+				MN_Debug.Error("AudioPatch", "Failed opening panel from built-in Audio row", { error = err })
+			end
+			return "break"
+		end
+		return orig_mouse(self, pos, button)
+	end
+
+	function PropBool:OnPropUpdate(context, prop_meta, value)
+		orig_update(self, context, prop_meta, value)
+		if prop_meta and prop_meta.id == OPT_ID then
+			if self.idOn then self.idOn:SetVisible(false) end
+			if self.idOff then self.idOff:SetVisible(false) end
+			self:SetEnabled(true)
+			self:SetHandleMouse(true)
+			APLog("Built-in Audio row rendered", {
+				id = prop_meta.id,
+				editor = prop_meta.editor,
+				value = value,
+				has_name = self.idName ~= nil,
+			})
+		end
+	end
+
+	MN_AudioPatch.bool_patch_applied = true
+	APLog("Installed built-in PropBool Audio-row hooks", {
+		has_mouse = type(PropBool.OnMouseButtonDown) == "function",
+		has_update = type(PropBool.OnPropUpdate) == "function",
+	})
+	return true
+end
+
 local function MN_PropPresent()
 	local OptionsObject = rawget(_G, "OptionsObject")
 	if not OptionsObject or type(OptionsObject.properties) ~= "table" then return nil end
@@ -291,12 +376,17 @@ local function MN_AddProperty()
 		-- Repair metadata left by a prior live mod reload before reusing it. A
 		-- stale editor value would leave this property with no MenuProp renderer.
 		existing.category = "Audio"
-		existing.editor = EDITOR
+		existing.editor = RENDER_EDITOR
 		existing.default = false
 		existing.dont_save = true
 		existing.no_edit = false
 		rawset(OptionsObject, "props_cache", false)
 		MN_AudioPatch.prop_added = true
+		APLog("Repaired existing Audio property", {
+			id = existing.id,
+			category = existing.category,
+			editor = existing.editor,
+		})
 		return true
 	end
 	local U = rawget(_G, "Untranslated")
@@ -306,7 +396,7 @@ local function MN_AddProperty()
 		name = name,
 		id = OPT_ID,
 		category = "Audio",
-		editor = EDITOR,
+		editor = RENDER_EDITOR,
 		default = false,
 		dont_save = true,
 		no_edit = false,
@@ -315,6 +405,11 @@ local function MN_AddProperty()
 	})
 	rawset(OptionsObject, "props_cache", false)
 	MN_AudioPatch.prop_added = true
+	APLog("Added built-in-rendered Audio property", {
+		id = OPT_ID,
+		category = "Audio",
+		editor = RENDER_EDITOR,
+	})
 	return true
 end
 
@@ -327,7 +422,7 @@ function MN_AudioPatch.Diagnose(reason)
 	APLog("DIAGNOSE", { reason = reason })
 	APLog("  config", {
 		PATCH_AUDIO_OPTIONS = MN_Config.PATCH_AUDIO_OPTIONS,
-		EDITOR = EDITOR, OPT_ID = OPT_ID,
+		LEGACY_EDITOR = EDITOR, RENDER_EDITOR = RENDER_EDITOR, OPT_ID = OPT_ID,
 	})
 	APLog("  class", {
 		class_defined = MN_AudioPatch.class_defined,
@@ -337,7 +432,12 @@ function MN_AudioPatch.Diagnose(reason)
 	APLog("  MenuProp group", {
 		present = type(grp) == "table",
 		count = type(grp) == "table" and #grp or -1,
-		has_our_member = MN_GroupHasMember(),
+		has_legacy_member = MN_GroupHasMember(),
+	})
+	APLog("  PropBool hooks", {
+		applied = MN_AudioPatch.bool_patch_applied,
+		has_original_mouse = type(MN_AudioPatch.orig_PropBool_OnMouseButtonDown) == "function",
+		has_original_update = type(MN_AudioPatch.orig_PropBool_OnPropUpdate) == "function",
 	})
 	APLog("  OptionsObject", {
 		present = OptionsObject ~= nil,
@@ -352,6 +452,23 @@ function MN_AudioPatch.Diagnose(reason)
 		init_calls = MN_AudioPatch.init_calls,
 		init_matched = MN_AudioPatch.init_matched,
 	})
+	if OptionsObject and type(OptionsObject.properties) == "table" then
+		local audio_count = 0
+		for index, meta in ipairs(OptionsObject.properties) do
+			if type(meta) == "table" and meta.category == "Audio" then
+				audio_count = audio_count + 1
+				APLog("  Audio property", {
+					index = index,
+					id = meta.id,
+					editor = meta.editor,
+					no_edit = meta.no_edit,
+					dont_save = meta.dont_save,
+					is_mute_notifications = meta.id == OPT_ID,
+				})
+			end
+		end
+		APLog("  Audio property audit complete", { count = audio_count })
+	end
 end
 
 -- Idempotent. Safe to call from several messages.
@@ -363,13 +480,35 @@ function MN_AudioPatch.Apply(reason)
 
 	APLog("Apply begin", { reason = reason })
 
-	local ok_group, err_group = pcall(MN_RegisterGroupMember)
-	if ok_group ~= true then APLog("RegisterGroupMember threw", { error = err_group }) end
+	local group_call_ok, group_ok, group_err = pcall(MN_RemoveLegacyGroupMember)
+	if group_call_ok ~= true then
+		APLog("RemoveLegacyGroupMember threw", { error = group_ok })
+	elseif group_ok ~= true then
+		APLog("RemoveLegacyGroupMember failed", { error = group_err })
+	end
 
-	local ok_prop, err_prop = pcall(MN_AddProperty)
-	if ok_prop ~= true then APLog("AddProperty threw", { error = err_prop }) end
+	local hook_call_ok, hook_ok, hook_err = pcall(MN_InstallBoolRowPatch)
+	if hook_call_ok ~= true then
+		APLog("InstallBoolRowPatch threw", { error = hook_ok })
+	elseif hook_ok ~= true then
+		APLog("InstallBoolRowPatch failed", { error = hook_err })
+	end
 
-	local success = MN_AudioPatch.group_registered and MN_AudioPatch.prop_added and MN_AudioPatch.class_defined
+	local prop_call_ok, prop_ok, prop_err = pcall(MN_AddProperty)
+	if prop_call_ok ~= true then
+		APLog("AddProperty threw", { error = prop_ok })
+	elseif prop_ok ~= true then
+		APLog("AddProperty failed", { error = prop_err })
+	end
+
+	local prop = MN_PropPresent()
+	local success = group_call_ok and group_ok
+		and hook_call_ok and hook_ok
+		and prop_call_ok and prop_ok
+		and MN_AudioPatch.bool_patch_applied
+		and MN_AudioPatch.prop_added
+		and prop and prop.editor == RENDER_EDITOR
+		and MN_GroupHasMember() ~= true
 
 	MN_AudioPatch.Diagnose("after Apply (" .. tostring(reason) .. ")")
 	APLog(success and "Apply OK (row should appear in Options -> Audio)" or "Apply INCOMPLETE (use MN_OpenPanel() to open the panel)")
