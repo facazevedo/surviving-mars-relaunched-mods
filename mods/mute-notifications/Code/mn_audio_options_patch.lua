@@ -57,6 +57,14 @@ local function APBox(left, top, right, bottom)
 	return nil
 end
 
+local function APColor(red, green, blue, alpha)
+	local fn = rawget(_G, "RGBA")
+	if type(fn) == "function" then
+		return fn(red, green, blue, alpha)
+	end
+	return nil
+end
+
 ----- Custom MenuProp row class -------------------------------------------------
 -- Defined at code load so the class exists in g_Classes after ClassesBuilt.
 
@@ -166,9 +174,11 @@ if rawget(_G, "XPropControl") ~= nil and rawget(_G, CLASS_NAME) == nil then
 	APLog("DefineClass.MN_OptionRow registered at code load")
 end
 
--- The class may survive a mod-code reload. Refresh the constructor every load so
--- non-matching properties return nil instead of creating hidden rows that can be
--- mistaken for the generated option row by OptionsContentWindow.
+-- The class may survive a mod-code reload. Refresh the constructor every load.
+-- Return a stock XTextButton for our property instead of constructing the custom
+-- XPropControl class directly. OptionsContentWindow assumes every visible
+-- property produces a child and crashes at child:SetMargins when construction
+-- fails; the stock button keeps this row on the engine's proven UI path.
 if rawget(_G, "XPropControl") ~= nil and rawget(_G, CLASS_NAME) ~= nil then
 	function MN_OptionRow:new(args, parent, context)
 		local pm = context and context.prop_meta
@@ -176,7 +186,51 @@ if rawget(_G, "XPropControl") ~= nil and rawget(_G, CLASS_NAME) ~= nil then
 			MN_AudioPatch.new_skipped = MN_AudioPatch.new_skipped + 1
 			return nil
 		end
-		return XPropControl.new(self, args, parent, context)
+
+		local XTextButton = rawget(_G, "XTextButton")
+		if not XTextButton then
+			MN_Debug.Error("AudioPatch", "XTextButton unavailable for Audio options row", { id = pm.id })
+			return nil
+		end
+
+		local row = XTextButton:new({
+			Translate = true,
+			TextStyle = "PropName",
+			HAlign = "left",
+			VAlign = "center",
+			MinWidth = 448,
+			MaxHeight = 35,
+			Padding = APBox(0, 0, 0, 0),
+			RolloverTemplate = "MarsRollover",
+			RolloverAnchor = "right",
+			RolloverOnFocus = true,
+			MouseCursor = "UI/Cursors/Rollover.tga",
+			Background = APColor(0, 0, 0, 0),
+			RolloverBackground = APColor(54, 68, 74, 160),
+			PressedBackground = APColor(85, 101, 108, 190),
+			FXMouseIn = "MenuItemHover",
+			FXPress = "MenuItemClick",
+			OnPress = function()
+				APLog("Audio row pressed -> opening panel")
+				local ok, err = pcall(MN_OpenPanel, "audio_options_row")
+				if ok ~= true then
+					MN_Debug.Error("AudioPatch", "Failed opening panel from Audio row", { error = err })
+				end
+			end,
+			SetSelected = function(button, selected)
+				local fn = rawget(_G, "IsUIStyleUsingGamepad")
+				if type(fn) == "function" and fn() then
+					button:SetFocus(selected)
+				end
+			end,
+		}, parent, context)
+		row:SetText(pm.name or pm.id)
+		if row.idLabel then
+			row.idLabel:SetHAlign("left")
+		end
+		MN_AudioPatch.init_calls = MN_AudioPatch.init_calls + 1
+		MN_AudioPatch.init_matched = MN_AudioPatch.init_matched + 1
+		return row
 	end
 
 	MN_AudioPatch.class_defined = true
@@ -232,7 +286,16 @@ local function MN_AddProperty()
 	if not OptionsObject or type(OptionsObject.properties) ~= "table" then
 		return false, "OptionsObject.properties unavailable"
 	end
-	if MN_PropPresent() then
+	local existing = MN_PropPresent()
+	if existing then
+		-- Repair metadata left by a prior live mod reload before reusing it. A
+		-- stale editor value would leave this property with no MenuProp renderer.
+		existing.category = "Audio"
+		existing.editor = EDITOR
+		existing.default = false
+		existing.dont_save = true
+		existing.no_edit = false
+		rawset(OptionsObject, "props_cache", false)
 		MN_AudioPatch.prop_added = true
 		return true
 	end
