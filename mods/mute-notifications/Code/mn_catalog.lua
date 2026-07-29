@@ -358,6 +358,10 @@ function MN_Catalog.Build(reason)
 		for _, scenario in ipairs(scenarios) do
 			if type(scenario) == "table" then
 				local scenario_id = tostring(scenario.id or "Scenario")
+				local mystery_number = string.match(scenario_id, "^Mystery%s+(%d+)$")
+				if mystery_number then
+					scenario_id = string.format("Mystery %02d", tonumber(mystery_number))
+				end
 				for _, sequence in ipairs(scenario) do
 					if type(sequence) == "table" then
 						for _, action in ipairs(sequence) do

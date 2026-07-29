@@ -8,7 +8,7 @@ MN_Config = {
 	MOD_DISPLAY_NAME = "Mute Notifications",
 
 	-- Canonical behaviour version (separate from metadata.lua mod 'version').
-	VERSION = "0.7.0",
+	VERSION = "0.7.1",
 
 	-- Feature flags --------------------------------------------------------
 	ENABLE_MOD = true,            -- master switch for voice suppression
