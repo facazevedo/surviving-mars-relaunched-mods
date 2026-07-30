@@ -27,6 +27,9 @@ MN_AudioPatch = {
 	orig_PropBool_new = false,
 	orig_PropBool_OnMouseButtonDown = false,
 	orig_PropBool_OnPropUpdate = false,
+	patched_PropBool_new = false,
+	patched_PropBool_OnMouseButtonDown = false,
+	patched_PropBool_OnPropUpdate = false,
 	new_skipped = 0,     -- MN_OptionRow:new skips for non-matching properties
 	init_calls = 0,      -- MN_OptionRow:Init invocations for OUR property
 	init_matched = 0,    -- ...of which matched OUR property
@@ -384,6 +387,9 @@ local function MN_InstallBoolRowPatch()
 		end
 	end
 
+	MN_AudioPatch.patched_PropBool_new = PropBool.new
+	MN_AudioPatch.patched_PropBool_OnMouseButtonDown = PropBool.OnMouseButtonDown
+	MN_AudioPatch.patched_PropBool_OnPropUpdate = PropBool.OnPropUpdate
 	MN_AudioPatch.bool_patch_applied = true
 	APLog("Installed built-in PropBool Audio-row hooks", {
 		has_new = type(PropBool.new) == "function",
@@ -444,6 +450,79 @@ local function MN_AddProperty()
 		editor = RENDER_EDITOR,
 	})
 	return true
+end
+
+local function MN_RemoveProperty()
+	local OptionsObject = rawget(_G, "OptionsObject")
+	if not OptionsObject or type(OptionsObject.properties) ~= "table" then
+		MN_AudioPatch.prop_added = false
+		return true
+	end
+
+	local removed = 0
+	for index = #OptionsObject.properties, 1, -1 do
+		local meta = OptionsObject.properties[index]
+		if type(meta) == "table" and meta.id == OPT_ID then
+			table.remove(OptionsObject.properties, index)
+			removed = removed + 1
+		end
+	end
+	if removed > 0 then
+		rawset(OptionsObject, "props_cache", false)
+	end
+	MN_AudioPatch.prop_added = false
+	APLog("Removed Audio property", { id = OPT_ID, removed = removed })
+	return true
+end
+
+local function MN_CanRestoreOwnedMethod(class_table, method_name, patched, original)
+	local current = class_table and class_table[method_name]
+	return type(original) == "function" and (current == patched or current == original)
+end
+
+local function MN_RestoreBoolRowPatch()
+	if MN_AudioPatch.bool_patch_applied ~= true then
+		return true
+	end
+
+	local PropBool = rawget(_G, "PropBool")
+	if type(PropBool) ~= "table" then
+		return false
+	end
+
+	local new_ok = MN_CanRestoreOwnedMethod(PropBool, "new",
+		MN_AudioPatch.patched_PropBool_new, MN_AudioPatch.orig_PropBool_new)
+	local mouse_ok = MN_CanRestoreOwnedMethod(PropBool, "OnMouseButtonDown",
+		MN_AudioPatch.patched_PropBool_OnMouseButtonDown, MN_AudioPatch.orig_PropBool_OnMouseButtonDown)
+	local update_ok = MN_CanRestoreOwnedMethod(PropBool, "OnPropUpdate",
+		MN_AudioPatch.patched_PropBool_OnPropUpdate, MN_AudioPatch.orig_PropBool_OnPropUpdate)
+	local restored = new_ok and mouse_ok and update_ok
+
+	if restored then
+		if PropBool.new == MN_AudioPatch.patched_PropBool_new then
+			PropBool.new = MN_AudioPatch.orig_PropBool_new
+		end
+		if PropBool.OnMouseButtonDown == MN_AudioPatch.patched_PropBool_OnMouseButtonDown then
+			PropBool.OnMouseButtonDown = MN_AudioPatch.orig_PropBool_OnMouseButtonDown
+		end
+		if PropBool.OnPropUpdate == MN_AudioPatch.patched_PropBool_OnPropUpdate then
+			PropBool.OnPropUpdate = MN_AudioPatch.orig_PropBool_OnPropUpdate
+		end
+		MN_AudioPatch.bool_patch_applied = false
+		MN_AudioPatch.orig_PropBool_new = false
+		MN_AudioPatch.orig_PropBool_OnMouseButtonDown = false
+		MN_AudioPatch.orig_PropBool_OnPropUpdate = false
+		MN_AudioPatch.patched_PropBool_new = false
+		MN_AudioPatch.patched_PropBool_OnMouseButtonDown = false
+		MN_AudioPatch.patched_PropBool_OnPropUpdate = false
+	else
+		MN_Debug.Warn("AudioPatch", "Atomic restore deferred for methods owned by a later wrapper", {
+			new_restored = new_ok,
+			mouse_restored = mouse_ok,
+			update_restored = update_ok,
+		}, "DEBUG_UI")
+	end
+	return restored
 end
 
 -- Full on-demand state dump (also called at the end of Apply).
@@ -547,4 +626,20 @@ function MN_AudioPatch.Apply(reason)
 	APLog(success and "Apply OK (row should appear in Options -> Audio)" or "Apply INCOMPLETE (use MN_OpenPanel() to open the panel)")
 
 	return success
+end
+
+-- Restore every runtime mutation owned by this module. This is safe to call
+-- repeatedly and refuses to overwrite a method currently owned by a later mod.
+function MN_AudioPatch.Restore(reason)
+	local property_ok = MN_RemoveProperty()
+	local group_ok = MN_RemoveLegacyGroupMember()
+	local hooks_ok = MN_RestoreBoolRowPatch()
+	local restored = property_ok and group_ok and hooks_ok
+	APLog(restored and "Restore OK" or "Restore incomplete; engine reload will finish cleanup", {
+		reason = reason,
+		property = property_ok,
+		group = group_ok,
+		hooks = hooks_ok,
+	})
+	return restored
 end

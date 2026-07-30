@@ -131,3 +131,41 @@ function MN_Persistence.ResetAll(opts)
 		MN_Persistence.Save("reset_all")
 	end
 end
+
+-- Remove all meaningful mod-owned state before an actual uninstall. The engine's
+-- supported per-mod writer does not expose key deletion, so persist an empty table;
+-- no mute selections, fallback preference, or defaults marker survives reinstall.
+function MN_Persistence.ClearAll(reason)
+	local store = MN_StorageTable()
+	if type(store) ~= "table" then
+		MN_UserSettings = false
+		return true
+	end
+
+	for key in pairs(store) do
+		store[key] = nil
+	end
+	MN_UserSettings = false
+
+	local writer = MN_StorageWriter()
+	if type(writer) ~= "function" then
+		MN_Debug.Warn("Persistence", "Uninstall cleanup could not write empty storage", {
+			reason = reason,
+		}, "DEBUG_PERSISTENCE")
+		return false
+	end
+
+	local call_ok, write_err = pcall(writer)
+	if call_ok ~= true or write_err ~= nil then
+		MN_Debug.Error("Persistence", "Uninstall cleanup failed to clear storage", {
+			reason = reason,
+			error = write_err,
+		})
+		return false
+	end
+
+	MN_Debug.Info("Persistence", "Cleared all mod-owned persistent settings", {
+		reason = reason,
+	}, "DEBUG_PERSISTENCE")
+	return true
+end

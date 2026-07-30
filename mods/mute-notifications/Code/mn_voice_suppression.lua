@@ -135,17 +135,39 @@ function MN_VoiceSuppression.Restore(reason)
 	-- Only fully unwrap when no other code replaced our wrapper in the meantime.
 	MN_VoiceSuppression.active = false
 	if MN_VoiceSuppression.applied == true then
-		if rawget(_G, "QueueVoice") == MN_QueueVoiceWrapper and MN_VoiceSuppression.orig_QueueVoice then
-			QueueVoice = MN_VoiceSuppression.orig_QueueVoice
+		local current_queue = rawget(_G, "QueueVoice")
+		local current_play = rawget(_G, "PlayVoicedText")
+		local queue_owned = current_queue == MN_QueueVoiceWrapper
+			or current_queue == MN_VoiceSuppression.orig_QueueVoice
+		local play_owned = current_play == MN_PlayVoicedTextWrapper
+			or current_play == MN_VoiceSuppression.orig_PlayVoicedText
+		local can_fully_unwrap = queue_owned and play_owned
+		if can_fully_unwrap then
+			if current_queue == MN_QueueVoiceWrapper then
+				QueueVoice = MN_VoiceSuppression.orig_QueueVoice
+			end
+			if current_play == MN_PlayVoicedTextWrapper then
+				PlayVoicedText = MN_VoiceSuppression.orig_PlayVoicedText
+			end
+			MN_VoiceSuppression.orig_QueueVoice = false
+			MN_VoiceSuppression.orig_PlayVoicedText = false
+			MN_VoiceSuppression.applied = false
+		else
+			-- Restore atomically. If either function has a later owner, leave both
+			-- dormant wrappers and original references intact until the engine reload.
+			MN_Debug.Warn("Suppression", "Restore deferred for functions owned by a later wrapper", {
+				queue_owned = queue_owned,
+				play_owned = play_owned,
+			}, "DEBUG_SUPPRESSION")
 		end
-		if rawget(_G, "PlayVoicedText") == MN_PlayVoicedTextWrapper and MN_VoiceSuppression.orig_PlayVoicedText then
-			PlayVoicedText = MN_VoiceSuppression.orig_PlayVoicedText
-		end
-		MN_VoiceSuppression.orig_QueueVoice = false
-		MN_VoiceSuppression.orig_PlayVoicedText = false
-		MN_VoiceSuppression.applied = false
+		MN_Debug.Info("Suppression", "Voice wrappers set to vanilla behavior", {
+			reason = reason,
+			fully_unwrapped = can_fully_unwrap,
+		})
+		return can_fully_unwrap
 	end
-	MN_Debug.Info("Suppression", "Voice wrappers restored to vanilla", { reason = reason })
+	MN_Debug.Info("Suppression", "Voice wrappers already restored to vanilla", { reason = reason })
+	return true
 end
 
 -- Play a voiced line on demand for the panel preview button, ALWAYS audible
