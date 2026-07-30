@@ -8,7 +8,7 @@ MN_Config = {
 	MOD_DISPLAY_NAME = "Mute Notifications",
 
 	-- Canonical behaviour version (separate from metadata.lua mod 'version').
-	VERSION = "0.8.1",
+	VERSION = "0.8.2",
 
 	-- Feature flags --------------------------------------------------------
 	ENABLE_MOD = true,            -- master switch for voice suppression
@@ -191,11 +191,11 @@ MN_ProtectedVoiceGroups = {
 -- recorded audio (Play would be silent and there is nothing to actually mute),
 -- or for verified duplicate preset ids where another working copy is kept.
 MN_ExcludedVoiceIds = {
-	Placeholder_1 = true, -- duplicate "Commander, one other thing."; keep Tutorial2_Popup13_1_Research2
+	Placeholder_1 = true, -- duplicate "Commander, one other thing."; keep recorded Tutorial2_Popup6_RCRover
 	Placeholder_2 = true, -- T(9430): no English voice sample in English.fpk
 	Placeholder_3 = true, -- T(9431): no English voice sample in English.fpk
 	Tutorial1_Popup1_Intro = true, -- duplicate "Welcome to Mars!"; keep WelcomeGameInfo
-	Tutorial2_Popup6_RCRover = true, -- duplicate "Commander, one other thing."; keep Tutorial2_Popup13_1_Research2
+	Tutorial2_Popup13_1_Research2 = true, -- T(237604843581) has no English sample; keep duplicate T(9429)
 	AllMilestonesCompleted = true, -- Play preview is silent; keep commented in MN_CustomNames for reference
 	ColonyViabilityExit_Delay_LastArk = true, -- duplicate "This will go down in history."; keep ColonyViabilityExit_Delay
 	ColonyViabilityExit_MartianBorn_LastArk = true, -- duplicate Martian-born line; keep ColonyViabilityExit_MartianBorn
@@ -476,7 +476,7 @@ MN_CustomNames = {
 	-- ["Thank you for completing your mission goals, Commander. Once again your submission documentation is up to par and we enjoyed reading through it. The team at Paradox Interactive HQ is grateful for your patience and determination."] = "Mission Evaluation",
 	-- ["Commander! You achieved all mission goals, regardless of the adversities you faced on Mars! A true pioneer - well done!"] = "Mission Evaluation",
 	-- ["Congratulations Commander! You have achieved that which the cynics said cannot be done by a non-governmental entity - and yet here we are."] = "Mission Evaluation",
-	["Commander, one other thing."] = "Commander, one other thing.",
+	["Commander, one other thing."] = "Research Points",
 	-- ["The capturing of Ice Asteroids has been successfully completed!"] = "Capture Ice Asteroids",
 	-- ["We have succeeded in capturing and diverting meteors towards our general vicinity in a gambit to bring precious resources and even scientific insight withing our reach."] = "Capture Meteors",
 	-- ["The remote scientific outpost is set and has started transmitting intriguing data from the Red Planet."] = "Contract Exploration Access",
