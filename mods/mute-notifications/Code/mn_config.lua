@@ -8,7 +8,7 @@ MN_Config = {
 	MOD_DISPLAY_NAME = "Mute Notifications",
 
 	-- Canonical behaviour version (separate from metadata.lua mod 'version').
-	VERSION = "0.8.6",
+	VERSION = "0.8.7",
 
 	-- Feature flags --------------------------------------------------------
 	ENABLE_MOD = true,            -- master switch for voice suppression
@@ -29,7 +29,7 @@ MN_Config = {
 	DEBUG_UI = false,             -- log panel / options-patch UI work
 	DEBUG_PERSISTENCE = false,    -- log load/save of user settings
 	-- Independent of DEBUG: prints detailed Audio-options-patch diagnostics.
-	DEBUG_AUDIO_PATCH = true,
+	DEBUG_AUDIO_PATCH = false,
 
 	-- Custom options-row editor type used by the Audio-page patch. Must not
 	-- collide with a vanilla editor (bool/number/choice/hotkey/...).
