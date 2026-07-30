@@ -783,6 +783,7 @@ function MN_Panel.Open(reason)
 	local list = XList:new({
 		Id = "idMNList",
 		Dock = "box",
+		VScroll = "idMNScroll",
 		MinHeight = 480,
 		MaxHeight = 480,
 		LayoutMethod = "VList",
@@ -815,6 +816,7 @@ function MN_Panel.Open(reason)
 		}, list_container)
 		MN_Debug.Info("Panel", "Created notification-list scrollbar", {
 			target = "idMNList",
+			list_v_scroll = "idMNScroll",
 			auto_hide = true,
 		}, "DEBUG_UI")
 	else
