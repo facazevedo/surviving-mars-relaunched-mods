@@ -8,6 +8,7 @@
 MN_Panel = {
 	root = false,
 	list = false,
+	scrollbar = false,
 	search = "",
 	search_edit = false,
 	group_filter = "All", -- unified filter value: All / category label / game group
@@ -91,6 +92,7 @@ local function MN_MakeText(parent, text, style, opts)
 		TextStyle = style or "PropValue",
 		HAlign = opts.HAlign or "left",
 		VAlign = opts.VAlign or "center",
+		TextHAlign = opts.TextHAlign or "left",
 		HandleMouse = opts.HandleMouse or false,
 		WordWrap = opts.WordWrap or false,
 		Shorten = opts.Shorten == true,
@@ -397,7 +399,9 @@ local function MN_BuildRow(list, entry, display_index)
 			Background = Col(30, 52, 40, 235), RolloverBackground = Col(42, 74, 56, 235) })
 	end
 
-	-- Text cell: a human-readable name + group on one line, spoken line beneath.
+	-- Text cell: a human-readable name with right-aligned group/categories on the
+	-- first line, followed by the spoken line. The separate category control keeps
+	-- metadata visible when a long title must be shortened.
 	-- Never show the technical preset id; if the only "title" is the id, use the
 	-- spoken line as the name instead.
 	local cell = XWindow:new({
@@ -413,20 +417,47 @@ local function MN_BuildRow(list, entry, display_index)
 	if category_text ~= "" then
 		label_text = label_text .. " | " .. category_text
 	end
-	MN_MakeText(cell,
-		string.format("%s%s   (%s)%s", MN_DisplayNumber(display_index), tostring(name), label_text,
-			entry.protected and "   *important*" or ""),
+	local title_line = XWindow:new({
+		LayoutMethod = "HList",
+		LayoutHSpacing = 12,
+		HAlign = "stretch",
+		MinHeight = 35,
+		MaxHeight = 35,
+	}, cell)
+	MN_MakeText(title_line,
+		string.format("%s%s", MN_DisplayNumber(display_index), tostring(name)),
 		"PropName", {
 			TextColor = Col(255, 255, 255, 255),
+			HAlign = "stretch",
 			WordWrap = false,
 			Shorten = true,
+			MinHeight = 35,
+			MaxHeight = 35,
+		})
+	MN_MakeText(title_line,
+		string.format("(%s)%s", label_text, entry.protected and "   *important*" or ""),
+		"PropName", {
+			TextColor = Col(180, 200, 210, 255),
+			HAlign = "right",
+			TextHAlign = "right",
+			WordWrap = false,
+			Shorten = true,
+			MinWidth = 360,
+			MaxWidth = 480,
 			MinHeight = 35,
 			MaxHeight = 35,
 		})
 	-- Always show the spoken line so custom display names never hide the audio text.
 	MN_MakeText(cell,
 		"\"" .. tostring(entry.spoken_text or entry.voiced_text) .. "\"",
-		"PropValue", { TextColor = Col(180, 200, 210, 255), WordWrap = false })
+		"PropValue", {
+			TextColor = Col(255, 255, 255, 255),
+			HAlign = "stretch",
+			WordWrap = false,
+			Shorten = true,
+			MinHeight = 35,
+			MaxHeight = 35,
+		})
 
 	-- Rows are always added after the list is already open, and ChildJoining does
 	-- not auto-open children, so open the row subtree explicitly.
@@ -510,6 +541,7 @@ function MN_Panel.Close(reason)
 	end
 	MN_Panel.root = false
 	MN_Panel.list = false
+	MN_Panel.scrollbar = false
 	MN_Panel.count_text = false
 	MN_Panel.search_edit = false
 	MN_Panel.filter_control = false
@@ -521,6 +553,7 @@ end
 function MN_Panel.Open(reason)
 	local XWindow = Cls("XWindow")
 	local XList = Cls("XList")
+	local XScrollBar = Cls("XScrollBar")
 	local XEdit = Cls("XEdit")
 	local desktop = rawget(_G, "terminal") and terminal.desktop or nil
 
@@ -740,13 +773,19 @@ function MN_Panel.Open(reason)
 	MN_Panel.SetFilter("All")
 	MN_Panel.count_text = MN_MakeText(toolbar, "", "PropValue", { HAlign = "right", MinWidth = 260 })
 
-	-- Notifications list: a FIXED-height field below the toolbar (does not grow to
-	-- fill the screen). Content beyond this height is clipped and scrolled with the
-	-- mouse wheel. Bottom padding lets the last row scroll clear of the clip edge.
-	local list = XList:new({
-		Id = "idMNList",
+	-- Notifications list: a fixed-height field below the toolbar. The list and its
+	-- native scrollbar are siblings so the scrollbar reserves a right-edge strip
+	-- instead of covering sentence text. Bottom padding lets the last row scroll
+	-- clear of the clip edge.
+	local list_container = XWindow:new({
 		HAlign = "stretch",
 		VAlign = "top",
+		MinHeight = 480,
+		MaxHeight = 480,
+	}, content)
+	local list = XList:new({
+		Id = "idMNList",
+		Dock = "box",
 		MinHeight = 480,
 		MaxHeight = 480,
 		LayoutMethod = "VList",
@@ -757,8 +796,33 @@ function MN_Panel.Open(reason)
 		Background = Col(12, 15, 18, 255),
 		Clip = "parent & self",
 		MouseScroll = true,
-	}, content)
+	}, list_container)
 	MN_Panel.list = list
+	if XScrollBar then
+		MN_Panel.scrollbar = XScrollBar:new({
+			Id = "idMNScroll",
+			Dock = "right",
+			Margins = box(6, 2, 2, 2),
+			MinWidth = 14,
+			MaxWidth = 14,
+			MinThumbSize = 48,
+			Target = "idMNList",
+			SnapToItems = true,
+			AutoHide = true,
+			Background = Col(18, 22, 26, 255),
+			DisabledBackground = Col(18, 22, 26, 160),
+			ScrollColor = Col(100, 118, 126, 255),
+			DisabledScrollColor = Col(70, 84, 90, 160),
+			BorderWidth = 1,
+			BorderColor = Col(50, 60, 66, 255),
+		}, list_container)
+		MN_Debug.Info("Panel", "Created notification-list scrollbar", {
+			target = "idMNList",
+			auto_hide = true,
+		}, "DEBUG_UI")
+	else
+		MN_Debug.Warn("Panel", "XScrollBar unavailable; list remains mouse-wheel scrollable", nil, "DEBUG_UI")
+	end
 
 	-- Footer buttons.
 	local footer = XWindow:new({

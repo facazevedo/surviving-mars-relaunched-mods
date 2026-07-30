@@ -3,10 +3,10 @@ return PlaceObj('ModDef', {
 	'description', "Selectively mute Mission Control alerts, HUD voices, tutorials, and scenario or mystery narration without lowering voice volume and without hiding any visual notifications. Adds 'Configure muted voice notifications...' under Game Options -> Audio, opening a searchable panel with a mute checkbox and a play/preview button for all verified recorded lines.",
 	'short_description', "Mute selected notifications",
 	'image', "Mod/MuteNotifications/Images/final_composed.jpg",
-	'last_changes', "Audio: Fix the Research Points preview using its recorded duplicate voice.",
+	'last_changes', "UI: Right-align title categories and add a styled list scrollbar.",
 	'id', "MuteNotifications",
 	'author', "fredware",
-	'version', 51,
+	'version', 52,
 	'lua_revision', 350453,
 	'saved_with_revision', 392284,
 	'code', {
