@@ -435,7 +435,7 @@ local function MN_BuildRow(list, entry, display_index)
 			MaxHeight = 35,
 		})
 	MN_MakeText(title_line,
-		string.format("(%s)%s", label_text, entry.protected and "   *important*" or ""),
+		string.format("(%s)", label_text),
 		"PropName", {
 			TextColor = Col(180, 200, 210, 255),
 			HAlign = "right",
