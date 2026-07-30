@@ -93,8 +93,12 @@ local function MN_MakeText(parent, text, style, opts)
 		VAlign = opts.VAlign or "center",
 		HandleMouse = opts.HandleMouse or false,
 		WordWrap = opts.WordWrap or false,
+		Shorten = opts.Shorten == true,
+		ShortenString = opts.ShortenString or "...",
 		MinWidth = opts.MinWidth,
 		MaxWidth = opts.MaxWidth,
+		MinHeight = opts.MinHeight,
+		MaxHeight = opts.MaxHeight,
 		TextColor = opts.TextColor or Col(230, 230, 230, 255),
 	}, parent)
 	t:SetText(text or "")
@@ -282,7 +286,7 @@ local function MN_EntryMatches(entry)
 		tostring(entry.title or ""), tostring(entry.id or ""),
 		tostring(entry.group or ""), MN_Catalog.EntryCategoryText(entry),
 		tostring(entry.game_title or ""), tostring(entry.item_text or ""),
-		tostring(entry.voiced_text or ""),
+		tostring(entry.spoken_text or ""), tostring(entry.voiced_text or ""),
 	}, " "))
 	return string.find(hay, q, 1, true) ~= nil
 end
@@ -298,7 +302,7 @@ end
 ----- row -----------------------------------------------------------------------
 
 local function MN_RowDisplayName(entry)
-	local voice = tostring(entry and entry.voiced_text or "")
+	local voice = tostring(entry and (entry.spoken_text or entry.voiced_text) or "")
 	local name = entry and entry.title or ""
 	if not name or name == "" or name == entry.id then
 		name = voice
@@ -412,10 +416,16 @@ local function MN_BuildRow(list, entry, display_index)
 	MN_MakeText(cell,
 		string.format("%s%s   (%s)%s", MN_DisplayNumber(display_index), tostring(name), label_text,
 			entry.protected and "   *important*" or ""),
-		"PropName", { TextColor = Col(255, 255, 255, 255) })
+		"PropName", {
+			TextColor = Col(255, 255, 255, 255),
+			WordWrap = false,
+			Shorten = true,
+			MinHeight = 35,
+			MaxHeight = 35,
+		})
 	-- Always show the spoken line so custom display names never hide the audio text.
 	MN_MakeText(cell,
-		"\"" .. tostring(entry.voiced_text) .. "\"",
+		"\"" .. tostring(entry.spoken_text or entry.voiced_text) .. "\"",
 		"PropValue", { TextColor = Col(180, 200, 210, 255), WordWrap = false })
 
 	-- Rows are always added after the list is already open, and ChildJoining does

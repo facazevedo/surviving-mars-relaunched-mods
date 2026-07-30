@@ -4,7 +4,7 @@
 -- builds a searchable catalog. Also owns default-spam matching and the one-time
 -- application of default mutes.
 
-local MN_CATALOG_SCHEMA_VERSION = 8
+local MN_CATALOG_SCHEMA_VERSION = 9
 local MN_REPEATED_CATEGORY = "Repeated"
 
 local function MN_CurrentConfigVersion()
@@ -62,6 +62,16 @@ end
 
 function MN_Catalog.VoiceTextKey(t)
 	return MN_Catalog.NormalizeText(MN_Catalog.Translate(t))
+end
+
+function MN_Catalog.SpokenText(voiced_text)
+	local source_text = tostring(voiced_text or "")
+	local overrides = rawget(_G, "MN_SpokenTextOverrides")
+	local override = type(overrides) == "table" and overrides[source_text] or nil
+	if type(override) == "string" and override ~= "" then
+		return override, true
+	end
+	return source_text, false
 end
 
 ----- Matching ------------------------------------------------------------------
@@ -220,6 +230,7 @@ function MN_Catalog.Build(reason)
 
 	local entries = {}
 	local by_id = {}
+	local spoken_text_override_count = 0
 
 	-- Discover every preset or synthetic source that carries a non-empty voiced
 	-- line. The game routes all sources below through QueueVoice or PlayVoicedText.
@@ -230,6 +241,7 @@ function MN_Catalog.Build(reason)
 
 		local voiced = preset[opts.voiced_field]
 		local voiced_str = MN_Catalog.Translate(voiced)
+		local spoken_text, spoken_text_overridden = MN_Catalog.SpokenText(voiced_str)
 		local group = preset.group or opts.default_group
 		local excluded = MN_ExcludedVoiceIds[id] == true or MN_ExcludedVoiceGroups[group] == true
 		local text_key = MN_Catalog.NormalizeText(voiced_str)
@@ -270,6 +282,8 @@ function MN_Catalog.Build(reason)
 			in_custom_list = in_custom_list,
 			text = MN_Catalog.Translate(preset.Text or preset.text),
 			voiced_text = voiced_str,
+			spoken_text = spoken_text,
+			spoken_text_overridden = spoken_text_overridden,
 			voiced_T = voiced,            -- raw T, used for accurate preview playback
 			voiced_text_key = text_key,
 			voice_actor = preset[opts.actor_field] or "narrator",
@@ -280,6 +294,14 @@ function MN_Catalog.Build(reason)
 			mute_by_default = (rule_key ~= nil) and (not protected),
 			protected = protected,
 		}
+		if spoken_text_overridden == true then
+			spoken_text_override_count = spoken_text_override_count + 1
+			MN_Debug.Info("Catalog", "Applied recorded-voice transcript override", {
+				id = entry_id,
+				source_text = voiced_str,
+				spoken_text = spoken_text,
+			}, "DEBUG_CATALOG")
+		end
 		entries[#entries + 1] = entry
 		by_id[entry_id] = entry
 		return true
@@ -412,6 +434,7 @@ function MN_Catalog.Build(reason)
 		reason = reason,
 		count = #entries,
 		repeated_count = repeated_count,
+		spoken_text_override_count = spoken_text_override_count,
 		scenario_voice_count = scenario_voice_count,
 		schema_version = MN_Catalog.schema_version,
 		config_version = MN_Catalog.config_version,
@@ -559,11 +582,12 @@ function MN_Catalog.Export(reason)
 	for _, entry in ipairs(MN_Catalog.entries) do
 		local muted = MN_Persistence.IsMutedById(entry.id)
 			or (MN_Persistence.UseTextFallback() and MN_Persistence.IsMutedByText(entry.voiced_text_key))
-		print(string.format("  [%s] id=%s muted=%s default=%s protected=%s repeated=%s repeat=%s/%s categories=%q title=%q voice=%q",
+		print(string.format("  [%s] id=%s muted=%s default=%s protected=%s repeated=%s repeat=%s/%s categories=%q title=%q voice=%q spoken=%q",
 			tostring(entry.group), tostring(entry.id), tostring(muted == true),
 			tostring(entry.mute_by_default), tostring(entry.protected),
 			tostring(entry.repeated == true), tostring(entry.repeat_index or ""), tostring(entry.repeat_total or ""),
-			MN_Catalog.EntryCategoryText(entry), tostring(entry.title), tostring(entry.voiced_text)))
+			MN_Catalog.EntryCategoryText(entry), tostring(entry.title), tostring(entry.voiced_text),
+			tostring(entry.spoken_text or entry.voiced_text)))
 	end
 end
 

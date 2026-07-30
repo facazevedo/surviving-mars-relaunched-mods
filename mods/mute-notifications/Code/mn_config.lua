@@ -8,7 +8,7 @@ MN_Config = {
 	MOD_DISPLAY_NAME = "Mute Notifications",
 
 	-- Canonical behaviour version (separate from metadata.lua mod 'version').
-	VERSION = "0.8.0",
+	VERSION = "0.8.1",
 
 	-- Feature flags --------------------------------------------------------
 	ENABLE_MOD = true,            -- master switch for voice suppression
@@ -35,6 +35,15 @@ MN_Config = {
 	-- collide with a vanilla editor (bool/number/choice/hotkey/...).
 	AUDIO_OPTION_EDITOR = "mn_open_panel",
 	AUDIO_OPTION_ID = "MN_ConfigureMutedVoices",
+}
+
+-- The game's localized voiced text is normally the recorded transcript, but a
+-- small number of shipped recordings differ from that source text. Keep these
+-- display-only corrections separate so voice lookup, preview playback and mute
+-- persistence continue using the original game text and translation id.
+MN_SpokenTextOverrides = {
+	["Construct two Hydroponic Farms in the new Dome. They will be used as workplaces for the Colonists in the old Dome once the Domes are connected."] =
+		"Construct two Farms in the new Dome. They will be used as workplaces for the Colonists in the old Dome once the Domes are connected.",
 }
 
 -- Default spam mute rules. match_ids are checked first (preferred, stable);
