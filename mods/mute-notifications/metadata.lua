@@ -23,6 +23,6 @@ return PlaceObj('ModDef', {
 	'code_hash', -3159825057203509546,
 	'pdx_id', 146384,
 	'pdx_version', "3",
-	'steam_id', "3774615460",
+	'steam_id', "3759765774",
 	'TagGameplay', true,
 })
