@@ -399,9 +399,8 @@ local function MN_BuildRow(list, entry, display_index)
 			Background = Col(30, 52, 40, 235), RolloverBackground = Col(42, 74, 56, 235) })
 	end
 
-	-- Text cell: a human-readable name with right-aligned group/categories on the
-	-- first line, followed by the spoken line. The separate category control keeps
-	-- metadata visible when a long title must be shortened.
+	-- Text cell: a human-readable name followed immediately by its group/categories
+	-- on the first line, with the spoken line beneath it.
 	-- Never show the technical preset id; if the only "title" is the id, use the
 	-- spoken line as the name instead.
 	local cell = XWindow:new({
@@ -419,7 +418,7 @@ local function MN_BuildRow(list, entry, display_index)
 	end
 	local title_line = XWindow:new({
 		LayoutMethod = "HList",
-		LayoutHSpacing = 12,
+		LayoutHSpacing = 8,
 		HAlign = "stretch",
 		MinHeight = 35,
 		MaxHeight = 35,
@@ -428,7 +427,7 @@ local function MN_BuildRow(list, entry, display_index)
 		string.format("%s%s", MN_DisplayNumber(display_index), tostring(name)),
 		"PropName", {
 			TextColor = Col(255, 255, 255, 255),
-			HAlign = "stretch",
+			HAlign = "left",
 			WordWrap = false,
 			Shorten = true,
 			MinHeight = 35,
@@ -438,12 +437,10 @@ local function MN_BuildRow(list, entry, display_index)
 		string.format("(%s)", label_text),
 		"PropName", {
 			TextColor = Col(180, 200, 210, 255),
-			HAlign = "right",
-			TextHAlign = "right",
+			HAlign = "left",
+			TextHAlign = "left",
 			WordWrap = false,
 			Shorten = true,
-			MinWidth = 360,
-			MaxWidth = 480,
 			MinHeight = 35,
 			MaxHeight = 35,
 		})
