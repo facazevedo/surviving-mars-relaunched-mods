@@ -30,6 +30,19 @@ function MN_Catalog.Translate(t)
 	-- them with no context spams "Invalid argument supplied to ColonistName(): nil"
 	-- (an uncatchable printf). For catalog display we only need the literal text;
 	-- voiced lines themselves are tag-free, so matching is unaffected.
+	-- tags_off gets dropped for userdata T values. AppendTTranslate only passes it
+	-- through for the table form, so userdata still resolves tags with no context and
+	-- <percentWithSign(reg_param1)> errors in FormatPercentWithSign. Pull the raw string
+	-- from TranslationTable instead, same thing tags_off would have given us.
+	if type(t) == "userdata" then
+		local get_id = rawget(_G, "TGetID")
+		local translation_table = rawget(_G, "TranslationTable")
+		if type(get_id) == "function" and type(translation_table) == "table" then
+			local ok_id, id = pcall(get_id, t)
+			local str = ok_id and id ~= nil and translation_table[id] or nil
+			if type(str) == "string" then return str end
+		end
+	end
 	local fn = rawget(_G, "_InternalTranslate")
 	if type(fn) == "function" then
 		local ok, s = pcall(fn, t, false, false, true)
