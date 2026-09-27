@@ -7,8 +7,12 @@
 5. **`salvage-tool-shortcut`** - Press `Delete` with no selected object to toggle salvage/demolish mode on or off.
 6. **`select-mixed-rovers`** - Allows drag selection of mixed rover types. Press `Ctrl+R` to select all rovers in the colony.
 7. **`t-for-tracks`** - Press `T` to toggle train track placement mode on or off.
+8. **`disable-all-mods`** - Disable other enabled mods and restore the previous selection from the Installed Mods screen.
 
 ## Install
+
+Compatibility checks for game build **1.1.1.405907**, including Disable All Mods,
+are recorded in [COMPATIBILITY.md](COMPATIBILITY.md).
 
 Copy any mod folder from `mods/` into:
 

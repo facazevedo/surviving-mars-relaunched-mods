@@ -20,7 +20,9 @@ end
 function Lifecycle.ApplyModBehavior(reason)
 	local validation = FlexiblePassages.Validation
 	if validation and type(validation.CheckRuntimeApi) == "function" then
-		validation.CheckRuntimeApi(reason)
+		if validation.CheckRuntimeApi(reason) ~= true then
+			return false, "required construction API unavailable"
+		end
 	end
 
 	local rules = FlexiblePassages.ConstructionRules
@@ -34,19 +36,22 @@ end
 function Lifecycle.RestoreVanillaBehavior(reason)
 	local rules = FlexiblePassages.ConstructionRules
 	if rules ~= nil and type(rules.RestoreVanillaBehavior) == "function" then
-		rules.RestoreVanillaBehavior(reason)
+		return rules.RestoreVanillaBehavior(reason)
 	end
 	return true
 end
 
 function Lifecycle.Enable(reason)
 	local st = State()
+	if FlexiblePassages.Config.ENABLE_FLEXIBLE_PASSAGE_CONSTRUCTION ~= true then
+		return Lifecycle.Disable(reason or "feature_disabled")
+	end
 	if st.active == true then
 		return Lifecycle.ApplyModBehavior(reason or "enable_already_active")
 	end
 
-	st.active = true
 	local ok, err = Lifecycle.ApplyModBehavior(reason or "enable")
+	st.active = ok == true
 
 	local log = FlexiblePassages.DebugLog
 	if log then
@@ -62,21 +67,18 @@ end
 
 function Lifecycle.Disable(reason)
 	local st = State()
-	if st.active ~= true then
-		return true
-	end
-
-	Lifecycle.RestoreVanillaBehavior(reason or "disable")
 	st.active = false
+	local restored = Lifecycle.RestoreVanillaBehavior(reason or "disable")
 
 	local log = FlexiblePassages.DebugLog
 	if log then
 		log.Info("Lifecycle", "Disabled", {
 			reason = reason,
+			restored = restored,
 		})
 	end
 
-	return true
+	return restored
 end
 
 FlexiblePassages.Lifecycle = Lifecycle
