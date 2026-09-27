@@ -6,7 +6,9 @@ if type(FlexiblePassages) ~= "table" then
 	rawset(_G, "FlexiblePassages", FlexiblePassages)
 end
 
-FlexiblePassages.State = FlexiblePassages.State or {
+-- Mod environments can survive ReloadLua, but the engine rebuilds its classes.
+-- Function ownership is transient and must never carry into that new class set.
+FlexiblePassages.State = {
 	active = false,
 	original_activate = false,
 	patched_activate = false,

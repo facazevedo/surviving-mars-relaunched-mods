@@ -10,6 +10,6 @@ FlexiblePassages.Version = {
 	MOD_ID = "FlexiblePassages",
 	MOD_TITLE = "Flexible Passages",
 	MOD_FOLDER = "flexible-passages",
-	METADATA_VERSION = 4,
-	VERSION_TEXT = "1.0.3",
+	METADATA_VERSION = 12,
+	VERSION_TEXT = "1.0.4",
 }

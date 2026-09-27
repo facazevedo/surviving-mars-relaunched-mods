@@ -99,7 +99,8 @@ end
 
 local function ShouldSnapPassagePoint(controller)
 	local cfg = Config()
-	return cfg.ENABLE_FLEXIBLE_PASSAGE_CONSTRUCTION == true
+	return State().active == true
+		and cfg.ENABLE_FLEXIBLE_PASSAGE_CONSTRUCTION == true
 		and cfg.ENABLE_TILE_SNAPPED_CONTROL_POINTS == true
 		and controller ~= nil
 		and controller.mode == "passage_grid"
