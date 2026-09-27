@@ -632,7 +632,7 @@ function MN_Panel.Open(reason)
 		local edit = XEdit:new({
 			Id = "idMNSearch",
 			Translate = false,
-			Hint = "type to filter...",
+			Hint = U("type to filter..."),
 			TextStyle = "PropValue",
 			MinWidth = 360,
 			MaxWidth = 360,

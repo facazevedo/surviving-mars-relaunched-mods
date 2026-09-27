@@ -1,5 +1,50 @@
 # Compatibility with Surviving Mars Relaunched 1.1.1.405907
 
+## September 27 follow-up: Mute Notifications Steam warning
+
+Mute Notifications is now metadata version **62**, runtime **0.9.1**. The fix
+was tested and deployed as version 61; the subsequent metadata update advances
+the mod version to 62 and the Paradox version to 4 without changing runtime code.
+This supersedes the version 60 result in the original compatibility pass below.
+
+The Steam release log Mars.exe-20260927-09.18.08-6aad2d75.log confirmed a real
+error during catalog construction: TFormat.percentWithSign compared a missing
+scenario value with a number. The earlier debug-build checks did not exercise
+the release build's localized lightuserdata. Read-only inspection of
+CommonLua/Core/localization.lua showed that its userdata translation branch
+drops tags_off, evaluating context-dependent tags despite the caller's request.
+The engine reports that error even inside the mod's pcall.
+
+The catalog now uses the verified TGetID and TranslationTable APIs to read
+localized userdata templates without invoking formatters. Translation IDs,
+preview inputs and saved mute settings are unchanged. The catalog cache schema
+was advanced to rebuild old entries. Missing templates produce diagnostics
+behind the existing exact-boolean MN_Config.DEBUG flag (false by default).
+Opening the panel also exposed a debug-build localization assertion for the
+search placeholder; mn_panel.lua now marks that literal with Untranslated.
+
+Validation: 12 new standalone catalog regression checks and the existing 56
+compatibility checks pass. Lua syntax checks pass. The real engine reproduced
+the old failure using LocIdToLightUserdata, then verified the fix against 13
+actual templates (2 percentage and 11 colonist-name templates). A full catalog
+rebuild with release-style inputs produced 415 entries. Existing Mute
+Notifications lifecycle checks and panel opening/closing passed. The fresh
+MarsDebug.exe-20260927-09.23.26-6aad2de6.log contains no Lua, translation or mod
+errors; the previously noted shader/video shutdown diagnostics remain. The
+reproduction log ending 09.21.22 intentionally contains the original error and
+the placeholder assertion. No logs were deleted.
+
+All 13 payload files were hash-verified against the separate local copy in
+%APPDATA%\Surviving Mars Relaunched\Mods\mute-notifications. Only mod-owned
+catalog, config, panel and metadata files changed, plus tests and this report.
+No game, third-party or asset files were edited. Tests restored the original
+enabled-mod selection and exited. The actual Steam warning dialog was not
+retested in a retail session: fully restart Steam's game, enable the local
+version 62 (or the tested version 61), then open Audio settings and the panel to confirm the warning is
+gone. Audible previews and colony save/load remain manual checks.
+
+## Original compatibility pass
+
 Checked on Windows on September 26, 2026 (September 27 UTC for the final run).
 The installed game reported Lua revision **405907**. All eight mods were
 deployed as separate folders under

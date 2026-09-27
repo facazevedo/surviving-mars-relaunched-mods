@@ -4,7 +4,7 @@
 -- builds a searchable catalog. Also owns default-spam matching and the one-time
 -- application of default mutes.
 
-local MN_CATALOG_SCHEMA_VERSION = 9
+local MN_CATALOG_SCHEMA_VERSION = 10
 local MN_REPEATED_CATEGORY = "Repeated"
 
 local function MN_CurrentConfigVersion()
@@ -26,6 +26,23 @@ MN_Catalog.scenarios_included = MN_Catalog.scenarios_included or false
 function MN_Catalog.Translate(t)
 	if t == nil or t == false then return "" end
 	if type(t) == "string" then return t end
+	-- Release builds store localized text as lightuserdata. In build 405907,
+	-- AppendTTranslate's userdata branch drops tags_off, so even a protected
+	-- translation evaluates context-dependent tags and emits OnLuaError. Read the
+	-- same localized template directly; catalog text must never evaluate those tags.
+	if type(t) == "userdata" then
+		local get_id = rawget(_G, "TGetID")
+		local translations = rawget(_G, "TranslationTable")
+		local id = type(get_id) == "function" and get_id(t) or nil
+		local text = type(translations) == "table" and id and translations[id]
+		if type(text) == "string" then return text end
+		MN_Debug.Error("Catalog", "Localized catalog template unavailable", {
+			translation_id = id,
+			has_id_api = type(get_id) == "function",
+			has_translation_table = type(translations) == "table",
+		})
+		return ""
+	end
 	-- tags_off=true: do NOT resolve TFormat tags like <ColonistName>. Resolving
 	-- them with no context spams "Invalid argument supplied to ColonistName(): nil"
 	-- (an uncatchable printf). For catalog display we only need the literal text;
