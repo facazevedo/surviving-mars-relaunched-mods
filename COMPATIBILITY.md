@@ -1,5 +1,13 @@
 # Compatibility with Surviving Mars Relaunched 1.1.1.405907
 
+## October 3 repository migration
+
+Flexible Passages and its 12 lifecycle regression checks are now maintained in
+[SMR-flexible-passages](https://github.com/facazevedo/SMR-flexible-passages).
+The historical eight-mod results below describe the collection before that
+move. This repository's compatibility suite now runs 44 regression checks;
+the separate mod repository retains the Flexible Passages runtime check.
+
 ## September 27 follow-up: Mute Notifications Steam warning
 
 Mute Notifications is now metadata version **62**, runtime **0.9.1**. The fix
@@ -113,7 +121,7 @@ Publication IDs, assets and per-store versions were not changed.
 - Lua 5.4 compiler checks cover every payload Lua file and both test files.
 - Each metadata code list matches items.lua in order and includes every
   owned code file.
-- Running lua tests/compatibility_spec.lua passes **56** regression checks.
+- The original lua tests/compatibility_spec.lua run passed **56** regression checks.
   These use simulated engine boundaries for mode changes, restrictions, mixed
   selection, reload ownership, feature flags and exact-boolean diagnostics.
 - Real-engine tests load each mod independently, then all eight together,

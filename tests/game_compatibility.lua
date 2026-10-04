@@ -83,24 +83,6 @@ local checks = {
         local count = 0; for _,p in ipairs(OptionsObject.properties) do if p.id == MN_Config.AUDIO_OPTION_ID then count=count+1 end end
         return active and disabled and restored and count == 1 and MN_VoiceSuppression.applied == true
     end,
-    FlexiblePassages = function()
-        local f = Mods.FlexiblePassages.env.FlexiblePassages
-        local startup = f.State.active == true and GridConstructionController.Activate == f.State.patched_activate
-        local available = f.Validation.CheckRuntimeApi("compatibility_test")
-        f.Lifecycle.Disable("compatibility_test")
-        local original_activate = GridConstructionController.Activate
-        local original_cursor = GridConstructionController.UpdateCursor
-        local enabled = f.Lifecycle.Enable("compatibility_test")
-        f.Lifecycle.Enable("compatibility_test_twice")
-        local active = GridConstructionController.Activate ~= original_activate
-        f.Lifecycle.Disable("compatibility_test"); f.Lifecycle.Disable("compatibility_test_twice")
-        local restored = GridConstructionController.Activate == original_activate and GridConstructionController.UpdateCursor == original_cursor
-        f.Lifecycle.Enable("compatibility_test")
-        f.Config.ENABLE_FLEXIBLE_PASSAGE_CONSTRUCTION = false; f.Lifecycle.Enable("feature_disabled")
-        local disabled = not f.State.active and GridConstructionController.Activate == original_activate
-        f.Config.ENABLE_FLEXIBLE_PASSAGE_CONSTRUCTION = true; f.Lifecycle.Enable("compatibility_test")
-        return startup and available and enabled and active and restored and disabled
-    end,
     DisableAllMods = function()
         local function count(root)
             if type(root) ~= "table" then return 0 end

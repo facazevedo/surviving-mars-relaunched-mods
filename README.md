@@ -1,13 +1,15 @@
 # Surviving Mars Relaunched Mods
 
 1. **`attribute-inspector`** - Shows a compact bottom-right inspector for the selected object, including attributes/properties and marker/deposit references.
-2. **`flexible-passages`** - Adds flexible dome passage placement. Left-click anchors the passage to a tile; right-click undoes the last anchor point.
-3. **`force-delete`** - Press `Ctrl+Delete` to force-delete selected demolishable objects, such as bugged train tracks.
-4. **`mute-notifications`** - Selectively mutes repeated Mission Control voice notifications without lowering voice volume or hiding visual notifications.
-5. **`salvage-tool-shortcut`** - Press `Delete` with no selected object to toggle salvage/demolish mode on or off.
-6. **`select-mixed-rovers`** - Allows drag selection of mixed rover types. Press `Ctrl+R` to select all rovers in the colony.
-7. **`t-for-tracks`** - Press `T` to toggle train track placement mode on or off.
-8. **`disable-all-mods`** - Disable other enabled mods and restore the previous selection from the Installed Mods screen.
+2. **`force-delete`** - Press `Ctrl+Delete` to force-delete selected demolishable objects, such as bugged train tracks.
+3. **`mute-notifications`** - Selectively mutes repeated Mission Control voice notifications without lowering voice volume or hiding visual notifications.
+4. **`salvage-tool-shortcut`** - Press `Delete` with no selected object to toggle salvage/demolish mode on or off.
+5. **`select-mixed-rovers`** - Allows drag selection of mixed rover types. Press `Ctrl+R` to select all rovers in the colony.
+6. **`t-for-tracks`** - Press `T` to toggle train track placement mode on or off.
+7. **`disable-all-mods`** - Disable other enabled mods and restore the previous selection from the Installed Mods screen.
+
+Flexible Passages is maintained separately in
+[SMR-flexible-passages](https://github.com/facazevedo/SMR-flexible-passages).
 
 ## Install
 
